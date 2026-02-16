@@ -1,0 +1,124 @@
+/* Email History Styles */
+
+.emailHistoryPage {
+    padding: var(--space-2xl);
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.container {
+    width: 100%;
+}
+
+/* Header */
+.header {
+    margin-bottom: var(--space-2xl);
+}
+
+.title {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+}
+
+/* Email List */
+.emailList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.emailCard {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    transition: all var(--transition-base);
+}
+
+.emailCard:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+}
+
+.emailHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-md);
+    gap: var(--space-md);
+}
+
+.emailInfo {
+    flex: 1;
+}
+
+.emailRecipient {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.emailSubject {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.emailStatus {
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    text-transform: capitalize;
+}
+
+.emailStatus.success {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--color-success);
+}
+
+.emailStatus.warning {
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--color-warning);
+}
+
+.emailStatus.error {
+    background: rgba(239, 83, 80, 0.1);
+    color: var(--color-error);
+}
+
+.emailFooter {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--color-border);
+}
+
+.emailDate {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .emailHistoryPage {
+        padding: var(--space-lg);
+    }
+
+    .emailHeader {
+        flex-direction: column;
+    }
+
+    .emailStatus {
+        align-self: flex-start;
+    }
+}

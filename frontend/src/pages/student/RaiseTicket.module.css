@@ -1,0 +1,186 @@
+/* Raise Ticket Styles */
+
+.raiseTicketPage {
+    padding: var(--space-2xl);
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.container {
+    width: 100%;
+}
+
+.header {
+    margin-bottom: var(--space-2xl);
+}
+
+.title {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+}
+
+/* Form */
+.form {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+}
+
+.formGroup {
+    margin-bottom: var(--space-lg);
+}
+
+.label {
+    display: block;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.select,
+.textarea {
+    width: 100%;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    font-size: var(--text-base);
+    color: var(--color-text-primary);
+    font-family: inherit;
+}
+
+.select:focus,
+.textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.1);
+}
+
+.select:disabled,
+.textarea:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.textarea {
+    resize: vertical;
+    line-height: 1.5;
+}
+
+.charCount {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    margin-top: 4px;
+    text-align: right;
+}
+
+/* Radio Group */
+.radioGroup {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.radioLabel {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    color: var(--color-text-primary);
+}
+
+.radioLabel input[type="radio"] {
+    cursor: pointer;
+}
+
+.radioLabel input[type="radio"]:disabled {
+    cursor: not-allowed;
+}
+
+/* Error */
+.error {
+    display: block;
+    color: var(--color-error);
+    font-size: var(--text-xs);
+    margin-top: 4px;
+}
+
+/* Actions */
+.actions {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-xl);
+}
+
+.submitButton {
+    flex: 1;
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+
+.submitButton:hover:not(:disabled) {
+    background: var(--color-primary-dark);
+    box-shadow: var(--shadow-md);
+}
+
+.submitButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.cancelButton {
+    background: transparent;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.cancelButton:hover:not(:disabled) {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-text-secondary);
+}
+
+.cancelButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .raiseTicketPage {
+        padding: var(--space-lg);
+    }
+
+    .form {
+        padding: var(--space-lg);
+    }
+
+    .actions {
+        flex-direction: column;
+    }
+
+    .radioGroup {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+}

@@ -1,0 +1,22 @@
+/* Student Layout Styles */
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+    background: var(--color-bg-primary);
+}
+
+.main {
+    margin-left: 240px;
+    flex: 1;
+    min-height: 100vh;
+    overflow-x: hidden;
+    transition: margin-left 0.3s ease;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .main {
+        margin-left: 60px;
+    }
+}

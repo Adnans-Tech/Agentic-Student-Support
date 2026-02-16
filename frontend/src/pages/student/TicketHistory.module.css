@@ -1,0 +1,397 @@
+/* Ticket History Styles */
+
+.ticketHistoryPage {
+    padding: var(--space-2xl);
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.container {
+    width: 100%;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-xl);
+    gap: var(--space-md);
+}
+
+.title {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+}
+
+.createButton button {
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+
+.createButton button:hover {
+    background: var(--color-primary-dark);
+    box-shadow: var(--shadow-md);
+}
+
+/* Filters */
+.filters {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-xl);
+    flex-wrap: wrap;
+}
+
+.filterButton {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    text-transform: capitalize;
+}
+
+.filterButton:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-border-hover);
+}
+
+.filterButton.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+/* Tickets List */
+.ticketsList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.ticketCard {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+}
+
+.ticketCard:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+    background: var(--color-bg-tertiary);
+}
+
+.ticketHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-md);
+    gap: var(--space-md);
+}
+
+.ticketInfo {
+    flex: 1;
+}
+
+.ticket Id {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-primary);
+    margin-bottom: 4px;
+}
+
+.ticketCategory {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.ticketBadges {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+}
+
+/* Status */
+.status {
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+}
+
+.statusOpen {
+    background: rgba(33, 150, 243, 0.1);
+    color: var(--color-info);
+}
+
+.statusProgress {
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--color-warning);
+}
+
+.statusResolved {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--color-success);
+}
+
+.statusClosed {
+    background: rgba(158, 158, 158, 0.1);
+    color: #9e9e9e;
+}
+
+/* Priority */
+.priority {
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+}
+
+.priorityHigh {
+    background: rgba(239, 83, 80, 0.1);
+    color: var(--color-error);
+}
+
+.priorityMedium {
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--color-warning);
+}
+
+.priorityLow {
+    background: rgba(76, 175, 80, 0.1);
+    color: var(--color-success);
+}
+
+.ticketDescription {
+    font-size: var(--text-base);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-md);
+    line-height: 1.5;
+}
+
+.ticketFooter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--color-border);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.ticketMeta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.ticketDepartment,
+.ticketDate {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Header Actions */
+.headerActions {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+}
+
+/* Close Button */
+.closeButton {
+    background: transparent;
+    border: 1px solid var(--color-error);
+    color: var(--color-error);
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.closeButton:hover:not(:disabled) {
+    background: var(--color-error);
+    color: white;
+}
+
+.closeButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Close All Button */
+.closeAllButton {
+    background: transparent;
+    border: 1px solid var(--color-error);
+    color: var(--color-error);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.closeAllButton:hover:not(:disabled) {
+    background: var(--color-error);
+    color: white;
+}
+
+.closeAllButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Confirmation Dialog */
+.dialogOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.confirmDialog {
+    background: var(--color-bg-primary);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: var(--shadow-xl);
+}
+
+.dialogIcon {
+    font-size: 48px;
+    margin-bottom: var(--space-md);
+}
+
+.dialogTitle {
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.dialogMessage {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-lg);
+    line-height: 1.5;
+}
+
+.dialogActions {
+    display: flex;
+    gap: var(--space-md);
+    justify-content: center;
+}
+
+.cancelButton {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cancelButton:hover {
+    background: var(--color-bg-tertiary);
+}
+
+.confirmButton {
+    background: var(--color-error);
+    border: none;
+    color: white;
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.confirmButton:hover {
+    opacity: 0.9;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .ticketHistoryPage {
+        padding: var(--space-lg);
+    }
+
+    .header {
+        flex-direction: column;
+    }
+
+    .headerActions {
+        flex-direction: column;
+        align-self: flex-start;
+        width: 100%;
+    }
+
+    .closeAllButton,
+    .createButton button {
+        width: 100%;
+    }
+
+    .ticketHeader {
+        flex-direction: column;
+    }
+
+    .ticketFooter {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    .ticketMeta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-xs);
+    }
+
+    .closeButton {
+        align-self: flex-start;
+        margin-top: var(--space-sm);
+    }
+
+    .dialogActions {
+        flex-direction: column;
+    }
+
+    .cancelButton,
+    .confirmButton {
+        width: 100%;
+    }
+}

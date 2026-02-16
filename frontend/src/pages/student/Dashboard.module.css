@@ -1,0 +1,91 @@
+/* Student Dashboard Styles */
+
+.dashboard {
+    padding: var(--space-2xl);
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: 100vh;
+}
+
+/* Header */
+.header {
+    margin-bottom: var(--space-2xl);
+}
+
+.title {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.subtitle {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+}
+
+/* Stats Grid */
+.statsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--space-lg);
+    margin-bottom: var(--space-2xl);
+}
+
+/* Section */
+.section {
+    margin-top: var(--space-2xl);
+}
+
+.sectionTitle {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-lg);
+}
+
+/* Quick Access Grid */
+.quickAccessGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--space-lg);
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .dashboard {
+        padding: var(--space-xl);
+    }
+
+    .statsGrid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .quickAccessGrid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .dashboard {
+        padding: var(--space-lg);
+    }
+
+    .statsGrid {
+        grid-template-columns: 1fr;
+        gap: var(--space-md);
+    }
+
+    .quickAccessGrid {
+        grid-template-columns: 1fr;
+        gap: var(--space-md);
+    }
+
+    .title {
+        font-size: var(--text-2xl);
+    }
+
+    .sectionTitle {
+        font-size: var(--text-xl);
+    }
+}

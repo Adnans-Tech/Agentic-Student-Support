@@ -1,0 +1,138 @@
+/* Dashboard Components Styles */
+
+/* Stats Card */
+.statsCard {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    box-shadow: var(--shadow-sm);
+    cursor: default;
+}
+
+.statsCard:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-border-hover);
+}
+
+.statsIcon {
+    font-size: 2rem;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.statsContent {
+    flex: 1;
+}
+
+.statsValue {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    margin-bottom: 4px;
+}
+
+.statsLabel {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+/* Color Variants for Stats */
+.statsCard.primary .statsValue {
+    color: var(--color-primary);
+}
+
+.statsCard.warning .statsValue {
+    color: var(--color-warning);
+}
+
+.statsCard.success .statsValue {
+    color: var(--color-success);
+}
+
+.statsCard.info .statsValue {
+    color: var(--color-info);
+}
+
+/* Quick Access Card */
+.quickAccessLink {
+    text-decoration: none;
+    display: block;
+}
+
+.quickAccessCard {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    text-align: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+
+.quickAccessCard:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+    background: var(--color-bg-tertiary);
+}
+
+.quickAccessIcon {
+    font-size: 3rem;
+    margin-bottom: var(--space-sm);
+}
+
+.quickAccessTitle {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.quickAccessDesc {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+/* Empty State */
+.emptyState {
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--color-text-secondary);
+}
+
+.emptyIcon {
+    font-size: 4rem;
+    opacity: 0.3;
+    margin-bottom: var(--space-md);
+}
+
+.emptyMessage {
+    font-size: var(--text-base);
+}
+
+/* Loading State */
+.loadingState {
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--color-text-secondary);
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto var(--space-md);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

@@ -1,0 +1,86 @@
+/* Streaming Status Styles */
+
+.streamingStatus {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    background: rgba(249, 250, 251, 0.8);
+    border-radius: 12px;
+    margin: 8px 0;
+}
+
+.step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.stepIcon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.stepText {
+    color: #6b7280;
+}
+
+/* Status-specific styles */
+.complete .stepIcon {
+    background: #22c55e;
+    color: white;
+}
+
+.complete .stepText {
+    color: #16a34a;
+    font-weight: 500;
+}
+
+.loading .stepIcon {
+    background: #3b82f6;
+    color: white;
+}
+
+.loading .stepText {
+    color: #2563eb;
+    font-weight: 500;
+}
+
+.pending .stepIcon {
+    background: #e5e7eb;
+    color: #9ca3af;
+}
+
+.error .stepIcon {
+    background: #ef4444;
+    color: white;
+}
+
+.error .stepText {
+    color: #dc2626;
+    font-weight: 500;
+}
+
+/* Spinning animation for loading state */
+.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}

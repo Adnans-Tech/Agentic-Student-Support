@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment Variables
+.env
+
+# Database Files
+*.db
+*.db-journal
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Node modules (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Vector databases
+data/vectordb/
+data/chat_memory_db/
+data/user_history_db/
+
+# Playwright Browsers
+pw-browsers/
+
+# Runtime data
+data/turn_logs.jsonl
+
+# Static uploads (user-generated)
+static/profile_photos/
+
+# Gemini Agent
+.gemini/
