@@ -32,9 +32,17 @@ class AgentResponse:
         artifacts: Optional[Dict[str, Any]] = None,
         next_expected: Optional[str] = None,
         side_effects: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        # --- New structured output fields ---
+        agent_name: Optional[str] = None,
+        detected_intent: Optional[str] = None,
+        confidence: Optional[float] = None,
+        required_slots: Optional[Dict[str, Any]] = None,
+        action_type: Optional[str] = None,        # "answer", "email_send", "ticket_create", "clarify"
+        preview_or_final: Optional[str] = None,   # "preview" or "final"
+        citations: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Create a valid agent response"""
+        """Create a valid agent response with structured output fields."""
         return {
             "status": status,
             "message": message,
@@ -43,7 +51,15 @@ class AgentResponse:
             "next_expected": next_expected,
             "side_effects": side_effects or [],
             "metadata": metadata or {},
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            # Structured output fields
+            "agent_name": agent_name,
+            "detected_intent": detected_intent,
+            "confidence": confidence,
+            "required_slots": required_slots or {},
+            "action_type": action_type,
+            "preview_or_final": preview_or_final,
+            "citations": citations or []
         }
     
     @staticmethod

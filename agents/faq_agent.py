@@ -204,9 +204,13 @@ class FAQAgent:
             max_tokens=500
         )
         
-        # Initialize vector store manager
+        # Initialize vector store manager (singleton — shares ML model across agents)
         print("[INFO] Initializing vector store for RAG...")
-        self.vector_manager = VectorStoreManager(rules_file=college_rules_file)
+        try:
+            from .vector_store import get_vector_store_manager
+        except ImportError:
+            from vector_store import get_vector_store_manager
+        self.vector_manager = get_vector_store_manager(rules_file=college_rules_file)
         # INCREASED k from 3 to 5 for better coverage of course queries
         self.retriever = self.vector_manager.get_retriever(k=5)
         print("[OK] Vector store ready")

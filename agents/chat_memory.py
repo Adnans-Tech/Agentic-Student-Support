@@ -356,7 +356,7 @@ class ChromaDBChatMemory(ChatMemoryBackend):
         try:
             results = self.collection.get(
                 where={"user_id": {"$eq": user_id}},
-                limit=1000  # Get all to deduplicate sessions
+                limit=100  # Capped from 1000 — prevents excessive memory usage
             )
             
             if not results['metadatas']:

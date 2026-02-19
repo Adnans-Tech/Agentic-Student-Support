@@ -5,9 +5,7 @@ Supports dual SQLite/PostgreSQL backends via db_config
 """
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
-from agents import EmailAgent, FAQAgent, TicketAgent
 from agents.faculty_db import FacultyDatabase, init_faculty_db
-from agents.email_request_service import EmailRequestService
 import os
 from datetime import timedelta
 import sqlite3
@@ -57,28 +55,22 @@ print("\n[INFO] Initializing Authentication System...")
 init_auth_database()
 init_faculty_database()
 
-# Initialize agents
+# Initialize orchestrator (creates all agents internally — FAQAgent, EmailAgent, TicketAgent)
+# This is the single point of initialization to avoid duplicate ML model loads
 print("\n" + "=" * 60)
 print("  Initializing Student Support Agents")
 print("=" * 60)
 
-faq_agent = FAQAgent()
-email_agent = EmailAgent()
-# Run automated email self-test on startup
-email_agent.send_test_email()
+print("\n[INFO] Initializing Orchestrator Agent...")
+from agents.orchestrator_agent import get_orchestrator
+orchestrator_agent = get_orchestrator()
 
-ticket_agent = TicketAgent()
+# Reuse orchestrator's email agent for OTP sending (avoids creating a duplicate)
+email_agent = orchestrator_agent.email_agent
 
 # Initialize faculty contact system
 print("\n[INFO] Initializing Faculty Contact System...")
 faculty_db = init_faculty_db()
-email_request_service = EmailRequestService()
-
-# Initialize orchestrator for agentic Chat Support
-# Initialize orchestrator for agentic Chat Support
-print("\n[INFO] Initializing Legacy Orchestrator Agent (Phase 4 Logic)...")
-from agents.orchestrator_agent import get_orchestrator
-orchestrator_agent = get_orchestrator()
 
 print("\n[OK] All agents initialized successfully\n")
 
@@ -1866,4 +1858,4 @@ if __name__ == '__main__':
     print("📝 Press Ctrl+C to stop the server\n")
     print("=" * 60)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5000)

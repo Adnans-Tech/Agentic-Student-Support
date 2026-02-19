@@ -114,6 +114,20 @@ def initialize_vector_store():
     return manager
 
 
+# =============================================================================
+# SINGLETON INSTANCE — prevents duplicate ML model loading
+# =============================================================================
+_vector_store_instance = None
+
+def get_vector_store_manager(rules_file='data/college_rules.txt') -> VectorStoreManager:
+    """Get singleton VectorStoreManager — prevents loading the HuggingFace
+    embedding model (~400MB) multiple times."""
+    global _vector_store_instance
+    if _vector_store_instance is None:
+        _vector_store_instance = VectorStoreManager(rules_file=rules_file)
+    return _vector_store_instance
+
+
 if __name__ == "__main__":
     # Test vector store initialization
     initialize_vector_store()
