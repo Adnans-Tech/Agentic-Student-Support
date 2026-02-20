@@ -37,7 +37,7 @@ try:
         update_session_activity, check_session_timeout
     )
     from .agent_protocol import AgentResponse
-    from .ticket_config import CATEGORIES
+    from .ticket_config import CATEGORIES, PRIORITY_LEVELS
     from .turn_logging import log_turn
     from .history_rag_service import get_history_rag_service
     
@@ -62,7 +62,7 @@ except ImportError:
         update_session_activity, check_session_timeout
     )
     from agents.agent_protocol import AgentResponse
-    from agents.ticket_config import CATEGORIES
+    from agents.ticket_config import CATEGORIES, PRIORITY_LEVELS
     from agents.turn_logging import log_turn
     from agents.history_rag_service import get_history_rag_service
     
@@ -122,7 +122,7 @@ class OrchestratorAgent:
             model_name="llama-3.1-8b-instant",
             temperature=0.1
         )
-        self.faq_agent = FAQAgent()
+        self.faq_agent = FAQAgent(llm=self.llm)
         self.email_agent = EmailAgent()
         self.ticket_agent = TicketAgent()
         self.faculty_db = FacultyDatabase()
@@ -232,6 +232,16 @@ RULES:
 - Capability questions like "can you send emails?" -> GREETING (NOT EMAIL)
 - If message is just a greeting/thanks/bye -> GREETING
 
+ENTITY EXTRACTION RULES (CRITICAL):
+- faculty_name: The name of the faculty/professor/teacher mentioned. Strip "Dr.", "Prof.", etc.
+- email_address: Any email address (user@domain.com)
+- purpose: MUST extract the reason/topic/subject if mentioned. Look for phrases after "about", "regarding", "for", "asking", "to discuss", "to request", "to inquire". NEVER return null for purpose if the user mentions a reason.
+  Examples:
+  - "email Dr. Kumar about internship" → purpose: "internship"
+  - "send email to test@email.com regarding exam schedule" → purpose: "exam schedule"
+  - "contact faculty for notes" → purpose: "notes"
+- ticket_description: Description of the issue/complaint
+
 CONVERSATION HISTORY:
 {history_text if history_text else "(none)"}
 
@@ -276,9 +286,7 @@ Return ONLY valid JSON:
     # =========================================================================
     def process_message(self, user_message: str, user_id: str, session_id: str,
                         mode: str = "auto", student_profile: Optional[Dict] = None) -> Dict:
-        print(f"\n{'='*60}")
-        print(f"[ORCHESTRATOR] '{user_message[:80]}'")
-        print(f"{'='*60}")
+        print(f"[ORCHESTRATOR] '{user_message[:80]}' (user={user_id})")
 
         update_session_activity(session_id)
         if check_session_timeout(session_id):
@@ -344,9 +352,11 @@ Return ONLY valid JSON:
         if intent == "FAQ":
             return self._handle_faq(user_message, user_id, session_id, student_profile, entities)
         elif intent == "EMAIL":
+            clear_flow(session_id, "active")  # Prevent stale state from old flows
             return self._handle_email_flow(
                 user_message, user_id, session_id, student_profile, entities, {})
         elif intent == "TICKET":
+            clear_flow(session_id, "active")  # Prevent stale state from old flows
             return self._handle_ticket_flow(
                 user_message, user_id, session_id, student_profile, entities, {})
         elif intent == "TICKET_STATUS":
@@ -393,6 +403,131 @@ Return ONLY valid JSON:
     # =========================================================================
     def _handle_faq(self, message, user_id, session_id, student_profile, entities):
         try:
+            msg_lower = message.lower().strip()
+
+            # --- Faculty data queries (e.g. "is Dr. X in CSM?", "faculty in CSE") ---
+            faculty_keywords = ['faculty', 'professor', 'teacher', 'sir', 'madam', 'ma\'am', 'hod', 'dean']
+            dept_keywords = ['department', 'dept', 'cse', 'csm', 'ece', 'eee', 'mech', 'civil', 'it', 'aiml', 'aids']
+            is_faculty_query = any(kw in msg_lower for kw in faculty_keywords) and any(kw in msg_lower for kw in dept_keywords)
+            # Also match "is <name> in <dept>" patterns
+            if not is_faculty_query and ('in ' in msg_lower or 'from ' in msg_lower) and any(kw in msg_lower for kw in faculty_keywords):
+                is_faculty_query = True
+
+            if is_faculty_query:
+                # Try to extract a faculty name or department from the message
+                try:
+                    # Search by department keywords found in message
+                    dept_found = None
+                    for dkw in dept_keywords:
+                        if dkw in msg_lower and dkw not in ['department', 'dept']:
+                            dept_found = dkw.upper()
+                            break
+
+                    # Search for specific faculty name
+                    search_result = self.faculty_db.search_faculty(
+                        name=message if not dept_found else None,
+                        department=dept_found,
+                        limit=10
+                    )
+                    # search_faculty returns {"status", "faculty", "matches", "message"}
+                    faculty_list = []
+                    if isinstance(search_result, dict):
+                        # Single exact match
+                        if search_result.get('faculty'):
+                            faculty_list = [search_result['faculty']]
+                        # Multiple matches
+                        elif search_result.get('matches'):
+                            faculty_list = search_result['matches']
+
+                    if faculty_list:
+                        lines = []
+                        for f in faculty_list[:10]:
+                            name = f.get('name', 'Unknown')
+                            desig = f.get('designation', '')
+                            dept = f.get('department', '')
+                            lines.append(f"• **{name}** — {desig}, {dept}")
+                        text = f"Here are the faculty members I found:\n\n" + "\n".join(lines)
+                        if dept_found:
+                            text = f"📋 **Faculty in {dept_found} department:**\n\n" + "\n".join(lines)
+                    else:
+                        # Try get_faculty_by_department as fallback for department queries
+                        if dept_found:
+                            all_faculty = self.faculty_db.get_faculty_by_department(dept_found)
+                            if all_faculty:
+                                lines = []
+                                for f in all_faculty[:10]:
+                                    name = f.get('name', 'Unknown')
+                                    desig = f.get('designation', '')
+                                    lines.append(f"• **{name}** — {desig}")
+                                text = f"📋 **Faculty in {dept_found} department:**\n\n" + "\n".join(lines)
+                            else:
+                                text = f"I couldn't find any faculty in the **{dept_found}** department. Please check the department name."
+                        else:
+                            text = search_result.get('message', '') if isinstance(search_result, dict) else ''
+                            if not text:
+                                text = "I couldn't find matching faculty. Try asking with a specific department name (e.g. CSE, CSM, ECE)."
+
+                    return self._make_response(
+                        text, session_id=session_id, user_id=user_id,
+                        user_message=message, intent="FAQ", agent="faq_agent",
+                        confidence=0.9, student_profile=student_profile)
+                except Exception as e:
+                    print(f"[WARN] Faculty query failed, falling through to FAQ: {e}")
+
+            # --- Email history queries ---
+            email_history_keywords = ['email history', 'emails sent', 'emails i sent', 'email log',
+                                       'sent emails', 'what emails', 'which emails', 'show emails',
+                                       'my emails', 'email records', 'how many emails sent',
+                                       'emails have i sent', 'list emails', 'previous emails']
+            is_email_history = any(kw in msg_lower for kw in email_history_keywords)
+
+            if is_email_history:
+                try:
+                    history = self.faculty_db.get_student_email_history(user_id)
+                    if history:
+                        lines = []
+                        for h in history[:10]:
+                            name = h.get('faculty_name', 'Unknown')
+                            subj = h.get('subject', 'No subject')
+                            status = h.get('status', 'Unknown')
+                            ts = h.get('timestamp', '')
+                            lines.append(f"• **To: {name}** — \"{subj}\" [{status}] ({ts})")
+                        text = f"📬 **Your Email History** ({len(history)} total):\n\n" + "\n".join(lines)
+                        if len(history) > 10:
+                            text += f"\n\n...and {len(history) - 10} more. Check the **Email History** page for the full list."
+                    else:
+                        text = "📭 You haven't sent any emails yet. You can email faculty from **Contact Faculty** or use **Send Email** in chat."
+
+                    return self._make_response(
+                        text, session_id=session_id, user_id=user_id,
+                        user_message=message, intent="FAQ", agent="faq_agent",
+                        confidence=0.9, student_profile=student_profile)
+                except Exception as e:
+                    print(f"[WARN] Email history query failed, falling through to FAQ: {e}")
+
+            # --- Email quota queries ---
+            quota_keywords = ['emails left', 'email left', 'email limit', 'email quota',
+                              'how many emails can', 'remaining emails', 'emails remaining',
+                              'can i send email', 'email count', 'daily email', 'daily limit']
+            is_quota_query = any(kw in msg_lower for kw in quota_keywords)
+
+            if is_quota_query:
+                try:
+                    allowed, remaining, mx = LimitsService.check_daily_limit(user_id, 'email')
+                    used = mx - remaining
+                    if allowed:
+                        text = f"📧 **Email Quota:**\n\n• Sent today: **{used}** / {mx}\n• Remaining: **{remaining}**\n\nYou can send {remaining} more email(s) today."
+                    else:
+                        text = f"📧 **Email Quota:**\n\n• Sent today: **{used}** / {mx}\n• Remaining: **0**\n\n⚠️ Daily email limit reached. Please try again tomorrow."
+
+                    return self._make_response(
+                        text, session_id=session_id, user_id=user_id,
+                        user_message=message, intent="FAQ", agent="faq_agent",
+                        confidence=0.9, student_profile=student_profile)
+                except Exception as e:
+                    print(f"[WARN] Quota query failed, falling through to FAQ: {e}")
+
+            # --- Default: route to FAQ agent ---
             result = self.faq_agent.process(
                 user_query=message, session_id=session_id, user_id=user_id)
             if isinstance(result, dict):
@@ -456,6 +591,14 @@ Return ONLY valid JSON:
         if email_match and not slots.get("recipient_email"):
             slots["recipient_email"] = email_match.group()
 
+        # Regex fallback: extract purpose from message text if LLM missed it
+        if not slots.get("purpose"):
+            purpose_match = re.search(
+                r'(?:about|for|regarding|asking|to discuss|to ask about|to inquire about)\s+(.+?)(?:\s*$)',
+                message, re.IGNORECASE)
+            if purpose_match and len(purpose_match.group(1).strip()) > 3:
+                slots["purpose"] = purpose_match.group(1).strip()
+
         # ---------- STEP: START ----------
         if step == "start":
             if slots.get("recipient_email"):
@@ -476,10 +619,26 @@ Return ONLY valid JSON:
                     slots["faculty_name"], message, user_id, session_id,
                     student_profile, slots, entities)
             else:
-                # Try extracting faculty name from message
+                # Try extracting faculty name AND purpose from message
+                # Pattern: "email/contact Dr. X about Y"
+                nm_with_purpose = re.search(
+                    r'(?:to|email|contact|write\s+to|send\s+(?:an?\s+)?email\s+to)\s+'
+                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*)?'
+                    r'(\w[\w\s]{1,30}?)\s+(?:about|regarding|for|asking|to discuss)\s+(.+?)\s*$',
+                    message, re.IGNORECASE)
+                if nm_with_purpose and len(nm_with_purpose.group(1).strip()) > 1:
+                    faculty_name = nm_with_purpose.group(1).strip()
+                    if not slots.get("purpose"):
+                        slots["purpose"] = nm_with_purpose.group(2).strip()
+                    return self._search_faculty(
+                        faculty_name, message, user_id, session_id,
+                        student_profile, slots, entities)
+
+                # Fallback: extract just the faculty name (no purpose in message)
                 nm = re.search(
-                    r'(?:to|email|contact)\s+(?:dr\.?\s*|prof\.?\s*|professor\s+)?'
-                    r'(\w[\w\s]{1,30}?)(?:\s+about|\s+regarding|\s+for|\s*$)',
+                    r'(?:to|email|contact|write\s+to|send\s+(?:an?\s+)?email\s+to)\s+'
+                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*)?'
+                    r'(\w[\w\s]{1,30}?)\s*$',
                     message, re.IGNORECASE)
                 if nm and len(nm.group(1).strip()) > 1:
                     return self._search_faculty(
@@ -497,6 +656,19 @@ Return ONLY valid JSON:
 
         # ---------- STEP: COLLECT_RECIPIENT ----------
         if step == "collect_recipient":
+            # Detect unrelated intents and break out of email flow
+            escape_patterns = [
+                r'\b(raise|create|open|file)\s+(a\s+)?ticket\b',
+                r'\b(check|view|close)\s+ticket\b',
+                r'\bticket\s+status\b',
+                r'\b(what|how|when|where|tell me about|explain)\b.*\b(attendance|placement|fee|hostel|library|admission)\b'
+            ]
+            for pattern in escape_patterns:
+                if re.search(pattern, message, re.IGNORECASE):
+                    clear_flow(session_id, "active")
+                    return self.process_message(message, user_id, session_id,
+                                                student_profile=student_profile)
+
             if email_match:
                 slots["recipient_email"] = email_match.group()
                 slots["recipient_name"] = email_match.group().split("@")[0]
@@ -508,9 +680,23 @@ Return ONLY valid JSON:
                     user_message=message, intent="EMAIL", agent="email_agent",
                     student_profile=student_profile, active_flow="email", slots=slots)
             else:
-                slots["faculty_name"] = message.strip()
+                # Extract faculty name from message — not the raw message
+                faculty_name = message.strip()
+                # Try to extract just the name part using regex
+                nm_extract = re.search(
+                    r'(?:to|email|contact|send\s+(?:an?\s+)?email\s+to|write\s+to)?\s*'
+                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*)?'
+                    r'([a-zA-Z][a-zA-Z\s]{1,30}?)'
+                    r'(?:\s+(?:about|regarding|for|asking|referring|requesting|to discuss)\s+(.+?))?\s*$',
+                    message, re.IGNORECASE)
+                if nm_extract and len(nm_extract.group(1).strip()) > 1:
+                    faculty_name = nm_extract.group(1).strip()
+                    # Also capture purpose if present
+                    if nm_extract.group(2) and not slots.get("purpose"):
+                        slots["purpose"] = nm_extract.group(2).strip()
+                slots["faculty_name"] = faculty_name
                 return self._search_faculty(
-                    message.strip(), message, user_id, session_id,
+                    faculty_name, message, user_id, session_id,
                     student_profile, slots, entities)
 
         # ---------- STEP: FACULTY_SELECT ----------
@@ -557,6 +743,10 @@ Return ONLY valid JSON:
                 return self._execute_email_send(
                     draft, user_id, session_id, student_profile, message, slots)
             elif any(k in msg_lower for k in EDIT_KEYWORDS):
+                # Mark as regenerate if user asked to regenerate
+                is_regen = any(k in msg_lower for k in ["regenerate", "regen", "try again", "rewrite", "redo"])
+                if is_regen:
+                    slots["_regenerate"] = True
                 return self._generate_email_preview(
                     message, user_id, session_id, student_profile, slots, entities)
             else:
@@ -575,12 +765,17 @@ Return ONLY valid JSON:
                         student_profile, slots, entities):
         try:
             result = self.faculty_db.search_faculty(name=name)
-            matches = result.get("faculty", [])
+            # CRITICAL: Use 'matches' key (list), NOT 'faculty' (can be None or dict)
+            matches = result.get("matches", [])
+            if matches is None:
+                matches = []
+            print(f"[INFO] Faculty Search Result: Found {len(matches)} matches")
+
             if len(matches) == 1:
                 f = matches[0]
                 slots["recipient_email"] = f.get("email", "")
                 slots["recipient_name"] = f.get("name", "")
-                slots["faculty_id"] = f.get("id", "")
+                slots["faculty_id"] = f.get("id", f.get("faculty_id", ""))
                 if not slots.get("purpose"):
                     self._save_flow(session_id, "email", "collect_purpose", slots, entities)
                     return self._make_response(
@@ -593,12 +788,13 @@ Return ONLY valid JSON:
                 return self._generate_email_preview(
                     message, user_id, session_id, student_profile, slots, entities)
             elif len(matches) > 1:
+                display_matches = matches[:5]
                 lines = [f"I found {len(matches)} matches for \"{name}\":\n"]
-                for i, fac in enumerate(matches[:5], 1):
+                for i, fac in enumerate(display_matches, 1):
                     lines.append(f"{i}. **{fac['name']}** — {fac.get('department','N/A')}")
                 lines.append("\nReply with the number.")
                 self._save_flow(session_id, "email", "faculty_select", slots, entities,
-                               extra={"faculty_matches": matches[:5]})
+                               extra={"faculty_matches": display_matches})
                 return self._make_response(
                     "\n".join(lines), response_type="clarification_request",
                     session_id=session_id, user_id=user_id,
@@ -614,6 +810,7 @@ Return ONLY valid JSON:
                     student_profile=student_profile, active_flow="email", slots=slots)
         except Exception as e:
             print(f"[ERROR] Faculty search: {e}")
+            traceback.print_exc()
             self._save_flow(session_id, "email", "collect_recipient", slots, entities)
             return self._make_response(
                 "Trouble searching faculty. Please provide the email address directly.",
@@ -626,34 +823,50 @@ Return ONLY valid JSON:
                                 student_profile, slots, entities):
         purpose = slots.get("purpose", message)
         recipient_name = slots.get("recipient_name", slots.get("recipient_email", ""))
+        recipient_email = slots.get("recipient_email", "")
         student_name = student_profile.get("name", "") if student_profile else ""
+        is_regen = slots.pop("_regenerate", False)
         try:
             subject = self.email_agent.generate_email_subject(purpose)
             body = self.email_agent.generate_email_body(
                 purpose=purpose, recipient_name=recipient_name,
-                student_name=student_name, length="medium")
+                student_name=student_name, length="medium",
+                regenerate=is_regen)
             draft = {
-                "to": slots.get("recipient_email", ""),
+                "to": recipient_email,
                 "to_name": recipient_name,
                 "subject": subject, "body": body,
                 "action": "email_preview"
             }
             self._save_flow(session_id, "email", "preview", slots, entities,
                            extra={"email_draft": draft})
-            preview = (f"📧 **Email Preview**\n\n"
-                       f"**To:** {recipient_name} ({slots.get('recipient_email','')})\n"
+
+            # Build the confirmation_data in the format the frontend expects:
+            # ConfirmationCard checks: action === 'email_preview' && preview
+            # preview must have {to, subject, body}
+            confirmation_payload = {
+                "action": "email_preview",
+                "summary": f"Email to {recipient_email}",
+                "preview": {
+                    "to": recipient_email,
+                    "subject": subject,
+                    "body": body
+                }
+            }
+            preview_text = (f"📧 **Email Preview**\n\n"
+                       f"**To:** {recipient_email}\n"
                        f"**Subject:** {subject}\n\n---\n{body}\n---\n\n"
                        "Reply **confirm** to send, **edit** to change, or **cancel**.")
             ao = {"agent_name": "email_agent", "detected_intent": "EMAIL",
                   "confidence": 0.95, "action_type": "email_send",
-                  "preview_or_final": "preview", "message_to_user": preview,
+                  "preview_or_final": "preview", "message_to_user": preview_text,
                   "required_slots": slots, "citations": []}
             return self._make_response(
-                preview, response_type="email_preview",
+                preview_text, response_type="email_preview",
                 session_id=session_id, user_id=user_id,
                 user_message=message, intent="EMAIL", agent="email_agent",
                 confidence=0.95, student_profile=student_profile,
-                agent_output=ao, confirmation_data=draft,
+                agent_output=ao, confirmation_data=confirmation_payload,
                 active_flow="email", slots=slots)
         except Exception as e:
             print(f"[ERROR] Email draft: {e}")
@@ -737,6 +950,17 @@ Return ONLY valid JSON:
         # ---------- STEP: PREVIEW ----------
         if step == "preview":
             ticket_data = state.get("ticket_data", {})
+            # Detect ticket status or close requests — escape from flow
+            status_patterns = [
+                r'\b(show|view|list|check|see)\s+(all\s+)?(my\s+)?(raised\s+|open\s+)?tickets\b',
+                r'\bticket\s+(status|history)\b',
+                r'\bclose\s+(all\s+)?ticket'
+            ]
+            for pattern in status_patterns:
+                if re.search(pattern, message, re.IGNORECASE):
+                    clear_flow(session_id, "active")
+                    return self._handle_ticket_status(
+                        message, user_id, session_id, student_profile, entities)
             if msg_lower in CONFIRM_KEYWORDS:
                 return self._execute_ticket_create(
                     ticket_data, user_id, session_id, student_profile, message, slots)
@@ -755,13 +979,17 @@ Return ONLY valid JSON:
     def _generate_ticket_preview(self, message, user_id, session_id,
                                  student_profile, slots, entities):
         description = slots.get("description", message)
-        # Auto-classify category using LLM
+        # Auto-classify category, generate title, priority, and formal description
         try:
-            cat_prompt = f"""Classify this student complaint into ONE category.
+            cat_prompt = f"""You are a student support system. Classify this student complaint and rewrite it formally.
+
 Categories: {', '.join(CATEGORIES.keys())}
-Complaint: "{description}"
-Also rewrite the complaint as a professional, clear description (2-3 sentences).
-Return JSON: {{"category":"...","professional_description":"..."}}"""
+Priority levels: Low, Medium, High, Urgent
+
+Student's complaint: "{description}"
+
+Return ONLY valid JSON (no markdown):
+{{"category":"one of the categories above","title":"concise 5-10 word ticket title","priority":"Low|Medium|High|Urgent","professional_description":"formal 2-3 sentence rewrite of the complaint"}}"""
             resp = self.llm.invoke(cat_prompt)
             text = resp.content.strip()
             if "```" in text:
@@ -771,11 +999,18 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                 text = text.strip()
             cat_result = json.loads(text)
             category = cat_result.get("category", "Other")
+            title = cat_result.get("title", description[:80])
+            priority = cat_result.get("priority", "Medium")
             prof_desc = cat_result.get("professional_description", description)
             if category not in CATEGORIES:
                 category = "Other"
-        except Exception:
+            if priority not in PRIORITY_LEVELS:
+                priority = "Medium"
+        except Exception as e:
+            print(f"[TICKET] LLM classification error: {e}")
             category = "Other"
+            title = description[:80]
+            priority = "Medium"
             prof_desc = description
 
         student_email = student_profile.get("email", user_id) if student_profile else user_id
@@ -783,25 +1018,45 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
         ticket_data = {
             "student_email": student_email,
             "category": category, "sub_category": sub_cat,
+            "priority": priority,
             "description": prof_desc, "attachments": []
         }
         self._save_flow(session_id, "ticket", "preview", slots, entities,
                        extra={"ticket_data": ticket_data})
-        preview = (f"🎫 **Ticket Preview**\n\n"
+
+        # Build confirmation payload matching ConfirmationCard.jsx expectations:
+        # ConfirmationCard checks: action === 'ticket_preview' && preview
+        # preview must have {category, sub_category, priority, title, description, editable}
+        confirmation_payload = {
+            "action": "ticket_preview",
+            "summary": f"Ticket: {title}",
+            "preview": {
+                "category": category,
+                "sub_category": sub_cat,
+                "priority": priority,
+                "title": title,
+                "description": prof_desc,
+                "editable": True
+            },
+            "ticket_data": ticket_data
+        }
+        preview_text = (f"🎫 **Ticket Preview**\n\n"
                    f"**Category:** {category}\n"
+                   f"**Priority:** {priority}\n"
+                   f"**Title:** {title}\n"
                    f"**Description:** {prof_desc}\n\n"
                    "Reply **confirm** to create or **cancel** to discard.")
         ao = {"agent_name": "ticket_agent", "detected_intent": "TICKET",
               "confidence": 0.9, "action_type": "ticket_create",
-              "preview_or_final": "preview", "message_to_user": preview,
+              "preview_or_final": "preview", "message_to_user": preview_text,
               "required_slots": {"description": prof_desc, "category": category},
               "citations": []}
         return self._make_response(
-            preview, response_type="confirmation_request",
+            preview_text, response_type="ticket_preview",
             session_id=session_id, user_id=user_id,
             user_message=message, intent="TICKET", agent="ticket_agent",
             confidence=0.9, student_profile=student_profile,
-            agent_output=ao, confirmation_data={"action": "ticket_preview", "ticket_data": ticket_data},
+            agent_output=ao, confirmation_data=confirmation_payload,
             active_flow="ticket", slots=slots)
 
     def _execute_ticket_create(self, ticket_data, user_id, session_id,
@@ -829,15 +1084,51 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                               student_profile, entities):
         try:
             email = student_profile.get("email", user_id) if student_profile else user_id
-            tickets = self.ticket_agent.get_student_tickets(email)
-            if not tickets:
+            msg_lower = message.lower().strip()
+
+            # --- Handle close ticket requests ---
+            close_match = re.search(r'close\s+(?:ticket\s*#?\s*)(\S+)', message, re.IGNORECASE)
+            close_all = bool(re.search(r'close\s+all\s+ticket', message, re.IGNORECASE))
+
+            if close_all:
+                result = self.ticket_agent.close_all_tickets(email)
+                text = result.get("message", "Could not close tickets.")
+                return self._make_response(
+                    text, session_id=session_id, user_id=user_id,
+                    user_message=message, intent="TICKET_STATUS", agent="ticket_agent",
+                    student_profile=student_profile)
+            elif close_match:
+                ticket_id = close_match.group(1)
+                result = self.ticket_agent.close_ticket(ticket_id, email)
+                text = result.get("message", result.get("error", "Could not close ticket."))
+                return self._make_response(
+                    text, session_id=session_id, user_id=user_id,
+                    user_message=message, intent="TICKET_STATUS", agent="ticket_agent",
+                    student_profile=student_profile)
+
+            # --- Show all tickets ---
+            result = self.ticket_agent.get_student_tickets(email)
+            ticket_list = result.get("tickets", []) if isinstance(result, dict) else []
+            if not ticket_list:
                 text = "You don't have any tickets. Would you like to raise one?"
             else:
-                lines = [f"📋 **Your Tickets** ({len(tickets)} total):\n"]
-                for t in tickets[:10]:
-                    status_icon = "🟢" if t.get("status") == "open" else "🔴"
-                    lines.append(f"{status_icon} **#{t.get('ticket_id','')}** — "
-                                f"{t.get('category','N/A')}: {t.get('description','')[:60]}...")
+                open_tickets = [t for t in ticket_list if t.get("status", "").lower() in ("open", "assigned", "in progress")]
+                closed_tickets = [t for t in ticket_list if t.get("status", "").lower() in ("closed", "resolved", "cancelled")]
+                lines = [f"📋 **Your Tickets** ({len(ticket_list)} total, {len(open_tickets)} open):\n"]
+                for t in ticket_list[:10]:
+                    status = t.get("status", "unknown").lower()
+                    if status in ("open", "assigned", "in progress"):
+                        status_icon = "🟢"
+                    elif status in ("resolved", "closed"):
+                        status_icon = "🔴"
+                    else:
+                        status_icon = "⚪"
+                    priority = t.get("priority", "")
+                    priority_badge = f" [{priority}]" if priority else ""
+                    lines.append(f"{status_icon} **#{t.get('ticket_id','')}**{priority_badge} — "
+                                f"{t.get('category','N/A')}: {t.get('description','')[:60]}")
+                if open_tickets:
+                    lines.append("\n💡 To close a ticket, say **close ticket #ID**")
                 text = "\n".join(lines)
             ao = {"agent_name": "ticket_agent", "detected_intent": "TICKET_STATUS",
                   "confidence": 0.9, "action_type": "answer",
@@ -849,6 +1140,7 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                 student_profile=student_profile, agent_output=ao)
         except Exception as e:
             print(f"[ERROR] Ticket status: {e}")
+            traceback.print_exc()
             return self._make_response(
                 "Error fetching tickets. Please try again.",
                 session_id=session_id, user_id=user_id,
@@ -899,6 +1191,28 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                             f"Email to {email.get('to_name', email.get('to',''))} — {email.get('subject','')[:60]}")
                     except Exception:
                         pass
+                    # Log to email_requests table so it appears in Email History
+                    try:
+                        sp = student_profile or {}
+                        recipient_name = email.get('to_name', email.get('to', ''))
+                        faculty_id = email.get('faculty_id', 'N/A')
+                        self.faculty_db.log_email_request(
+                            student_email=user_id,
+                            student_name=sp.get('full_name', sp.get('name', 'Unknown')),
+                            student_roll_no=sp.get('roll_number', sp.get('roll_no', 'N/A')),
+                            student_department=sp.get('department', 'N/A'),
+                            student_year=sp.get('year', 'N/A'),
+                            faculty_id=faculty_id,
+                            faculty_name=recipient_name if recipient_name else 'Unknown',
+                            subject=email.get('subject', 'No Subject'),
+                            message=email.get('body', ''),
+                            attachment_name=None,
+                            status='Sent'
+                        )
+                    except Exception as e:
+                        print(f"[WARN] Failed to log email to history: {e}")
+                    # Clear the email flow state so next message isn't trapped
+                    clear_flow(session_id, "active")
                     return {"success": True,
                             "message": f"✅ Email sent to {email.get('to_name', email.get('to',''))}!"}
                 return {"success": False,
@@ -911,11 +1225,25 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                             "message": f"🎫 Daily ticket limit reached ({mx}/{mx})."}
                 td = action_data.get("ticket_data", {})
                 td["student_email"] = user_id
+                # Merge edited fields from frontend if present
+                edited = action_data.get("edited_draft", {})
+                if edited:
+                    if edited.get("description"):
+                        td["description"] = edited["description"]
+                    if edited.get("title"):
+                        td["description"] = f"{edited['title']}\n\n{td.get('description', '')}"
+                    if edited.get("category"):
+                        td["category"] = edited["category"]
+                    if edited.get("priority"):
+                        td["priority"] = edited["priority"]
                 cat = td.get("category", "Other")
                 if cat in CATEGORIES:
                     td["sub_category"] = CATEGORIES[cat][0]
                 else:
                     td["sub_category"] = "General Query"
+                # Ensure priority is set
+                if not td.get("priority"):
+                    td["priority"] = "Medium"
                 result = self.ticket_agent.create_ticket(td)
                 if result.get("success"):
                     tid = result.get("ticket_id")
@@ -930,6 +1258,8 @@ Return JSON: {{"category":"...","professional_description":"..."}}"""
                             f"Ticket #{tid} — {cat}: {td.get('description','')[:60]}")
                     except Exception:
                         pass
+                    # Clear the ticket flow state so next message isn't trapped
+                    clear_flow(session_id, "active")
                     return {"success": True, "ticket_id": tid,
                             "message": f"✅ Ticket **#{tid}** created!"}
                 return {"success": False,

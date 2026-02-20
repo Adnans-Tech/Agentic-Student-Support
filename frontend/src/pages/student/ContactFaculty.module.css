@@ -175,4 +175,197 @@
     .facultyGrid {
         grid-template-columns: 1fr;
     }
+
+    .searchBox {
+        width: 100%;
+    }
+}
+
+/* Search Box */
+.searchContainer {
+    margin-bottom: var(--space-lg);
+}
+
+.searchBox {
+    width: 100%;
+    padding: 0.85rem 1.2rem 0.85rem 2.8rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    transition: all var(--transition-base);
+    outline: none;
+}
+
+.searchBox::placeholder {
+    color: var(--color-text-secondary);
+    opacity: 0.7;
+}
+
+.searchBox:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(0, 200, 200, 0.15);
+}
+
+.searchWrapper {
+    position: relative;
+    max-width: 480px;
+}
+
+.searchIcon {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    font-size: 1.1rem;
+    pointer-events: none;
+}
+
+/* Modal Overlay (solid background) */
+.modalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 2rem;
+}
+
+.modalContent {
+    background: #1a1a2e;
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 600px;
+    padding: 2rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modalTitle {
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.modalSubtitle {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+.formGroup {
+    margin-bottom: 1.5rem;
+}
+
+.formLabel {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.formLabel .required {
+    color: #ef4444;
+}
+
+.formInput {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    transition: border-color var(--transition-base);
+    outline: none;
+}
+
+.formInput:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(0, 200, 200, 0.15);
+}
+
+.formInput::placeholder {
+    color: var(--color-text-secondary);
+    opacity: 0.6;
+}
+
+.formTextarea {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    font-family: inherit;
+    resize: vertical;
+    transition: border-color var(--transition-base);
+    outline: none;
+}
+
+.formTextarea:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(0, 200, 200, 0.15);
+}
+
+.formTextarea::placeholder {
+    color: var(--color-text-secondary);
+    opacity: 0.6;
+}
+
+.modalActions {
+    display: flex;
+    gap: 1rem;
+}
+
+.cancelBtn {
+    flex: 1;
+    padding: 0.85rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.cancelBtn:hover:not(:disabled) {
+    background: var(--color-bg-secondary);
+}
+
+.sendBtn {
+    flex: 1;
+    padding: 0.85rem;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--color-primary);
+    color: white;
+    font-size: var(--text-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.sendBtn:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.sendBtn:disabled,
+.cancelBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }

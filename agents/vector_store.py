@@ -19,8 +19,17 @@ class VectorStoreManager:
     def __init__(self, rules_file='data/college_rules.txt'):
         self.rules_file = rules_file
         self.vector_store_path = VECTOR_STORE_PATH
-        self.embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+        self.embeddings = None  # Lazy — loaded on first use
         self.vectorstore = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Lazy-load the HuggingFace embedding model on first use."""
+        if not self._initialized:
+            print("[INFO] Loading embedding model (first use)...")
+            self.embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+            self._initialized = True
+            print("[OK] Embedding model loaded")
         
     def load_and_split_documents(self):
         """Load college rules and split into chunks"""
@@ -48,6 +57,8 @@ class VectorStoreManager:
     
     def initialize_vectorstore(self):
         """Create or load vector store"""
+        self._ensure_initialized()
+        
         # Check if vector store exists
         if os.path.exists(self.vector_store_path) and os.path.exists(f"{self.vector_store_path}/index.faiss"):
             try:

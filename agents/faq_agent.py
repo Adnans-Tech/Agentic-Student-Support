@@ -5,6 +5,7 @@ Now includes conversation history for context awareness
 Enhanced with synonym mapping, comparative query handling, and natural language responses
 """
 import sys
+import time
 sys.path.append('..')
 
 from langchain_groq import ChatGroq
@@ -14,6 +15,14 @@ from langchain_core.output_parsers import StrOutputParser
 from config import GROQ_API_KEY
 from typing import Optional, List, Dict
 import re
+
+# Performance: toggle verbose logging
+DEBUG_LOGGING = False
+
+# Performance: simple TTL cache for FAQ responses
+_faq_cache = {}
+_FAQ_CACHE_TTL = 300  # 5 minutes
+_FAQ_CACHE_MAX_SIZE = 50
 
 try:
     from .vector_store import VectorStoreManager
@@ -194,15 +203,18 @@ class FAQAgent:
     Maintains conversation context across turns
     """
     
-    def __init__(self, college_rules_file='data/college_rules.txt'):
-        # Initialize LLM with LOW temperature for deterministic, fact-based responses
-        # Temperature 0.1 instead of 0.7 to prevent hallucination
-        self.llm = ChatGroq(
-            api_key=GROQ_API_KEY,
-            model_name="llama-3.1-8b-instant",
-            temperature=0.1,  # CRITICAL: Low temperature = less hallucination
-            max_tokens=500
-        )
+    def __init__(self, college_rules_file='data/college_rules.txt', llm=None):
+        # Reuse shared LLM if provided, otherwise create one
+        if llm is not None:
+            self.llm = llm
+            print("[OK] FAQ Agent reusing shared LLM instance")
+        else:
+            self.llm = ChatGroq(
+                api_key=GROQ_API_KEY,
+                model_name="llama-3.1-8b-instant",
+                temperature=0.1,
+                max_tokens=500
+            )
         
         # Initialize vector store manager (singleton — shares ML model across agents)
         print("[INFO] Initializing vector store for RAG...")
@@ -290,6 +302,24 @@ USER'S QUESTION: {question}
 Respond naturally and completely:"""
         
         self.prompt = ChatPromptTemplate.from_template(self.template)
+
+    # =====================================================================
+    # PERFORMANCE: Simple TTL cache for FAQ responses
+    # =====================================================================
+    def _check_cache(self, query_key: str):
+        """Check if a cached response exists and is still fresh."""
+        entry = _faq_cache.get(query_key)
+        if entry and (time.time() - entry['time']) < _FAQ_CACHE_TTL:
+            return entry['response']
+        return None
+
+    def _store_cache(self, query_key: str, response):
+        """Store a response in the cache, evicting old entries if needed."""
+        if len(_faq_cache) >= _FAQ_CACHE_MAX_SIZE:
+            # Evict oldest entry
+            oldest_key = min(_faq_cache, key=lambda k: _faq_cache[k]['time'])
+            del _faq_cache[oldest_key]
+        _faq_cache[query_key] = {'response': response, 'time': time.time()}
         
     
     def _format_docs(self, docs) -> str:
@@ -378,6 +408,13 @@ Respond naturally and completely:"""
         """
         try:
             query_lower = user_query.lower()
+
+            # PERFORMANCE: Check cache first
+            cache_key = query_lower.strip()
+            cached = self._check_cache(cache_key)
+            if cached:
+                print(f"[FAQ] Cache hit for: {user_query[:50]}")
+                return cached
             
             # DETECT if user is asking about PAST INTERACTIONS
             # Only inject history if explicitly requested
@@ -391,7 +428,8 @@ Respond naturally and completely:"""
             # Get conversation history ONLY if user explicitly asks
             if user_wants_history:
                 conversation_history = self._get_conversation_context(user_id, session_id)
-                print(f"[FAQ] User asked about past interactions - including history")
+                if DEBUG_LOGGING:
+                    print(f"[FAQ] User asked about past interactions - including history")
             else:
                 conversation_history = "(User did not ask about past interactions - not shown)"
             
@@ -446,54 +484,33 @@ Respond naturally and completely:"""
             
             # SYNONYM EXPANSION: Enhance query with synonyms for better RAG retrieval
             enhanced_query = expand_query_with_synonyms(user_query)
-            if enhanced_query != user_query:
-                print(f"[FAQ][ENHANCE] Query expanded with synonyms")
-                print(f"[FAQ][ENHANCE] Original: {user_query}")
-                print(f"[FAQ][ENHANCE] Enhanced: {enhanced_query}")
-            
-            # Retrieve from vector store - ALWAYS execute, NEVER skip
-            print(f"[FAQ][DB] ========================================")
-            print(f"[FAQ][DB] Executing vector store query...")
-            print(f"[FAQ][DB] Query: {enhanced_query[:80]}...")
+            if DEBUG_LOGGING and enhanced_query != user_query:
+                print(f"[FAQ] Query expanded: {enhanced_query[:80]}")
             
             # Enhanced retrieval for specific query types
             if is_course_query:
-                # Course data is in UG INTAKE SNAPSHOT section - need more docs
                 retrieval_k = 7
-                print(f"[FAQ][DB] Course query detected - using k={retrieval_k}")
             elif is_placement_query:
                 retrieval_k = 5
-                print(f"[FAQ][DB] Placement query detected - using k={retrieval_k}")
             else:
-                retrieval_k = 5  # Default
+                retrieval_k = 5
             
-            # Use custom retriever if needed
+            # Retrieve from vector store
             if retrieval_k != 5:
                 try:
                     custom_retriever = self.vector_manager.get_retriever(k=retrieval_k)
-                    docs = custom_retriever.invoke(enhanced_query)  # Use enhanced query
-                    print(f"[FAQ][DB] Using enhanced retrieval k={retrieval_k}")
+                    docs = custom_retriever.invoke(enhanced_query)
                 except:
-                    docs = self.retriever.invoke(enhanced_query)  # Use enhanced query
+                    docs = self.retriever.invoke(enhanced_query)
             else:
-                docs = self.retriever.invoke(enhanced_query)  # Use enhanced query
+                docs = self.retriever.invoke(enhanced_query)
             
-            # Format and log results
+            # Format context
             context = self._format_docs(docs)
+            print(f"[FAQ] Retrieved {len(docs)} docs ({len(context)} chars)")
             
-            # DETAILED LOGGING - Essential for debugging
-            print(f"[FAQ][DB] Query executed: YES")
-            print(f"[FAQ][DB] Documents retrieved: {len(docs)}")
-            print(f"[FAQ][DB] Context length: {len(context)} chars")
-            
-            if context and len(context.strip()) > 50:
-                print(f"[FAQ][DB] Status: DATA FOUND ✓")
-                print(f"[FAQ][DB] First 200 chars: {context[:200]}...")
-            else:
-                print(f"[FAQ][DB] Status: NO DATA FOUND ✗")
+            if not context or len(context.strip()) <= 50:
                 context = "(Database query executed - no relevant information found for this query)"
-            
-            print(f"[FAQ][DB] ========================================")
             
             # Placement fallback - only AFTER database was checked
             if is_placement_query and len(context.strip()) < 50:
@@ -508,7 +525,6 @@ Respond naturally and completely:"""
             })
             
             # Get LLM response
-            print(f"[FAQ][LLM] Generating response from LLM...")
             response = self.llm.invoke(prompt_value)
             
             # Parse response
@@ -517,19 +533,11 @@ Respond naturally and completely:"""
             llm_response = parser.invoke(response)
             
             # POST-PROCESSING: Apply enhancements
-            
-            # 1. Check for comparative queries first
             comparative_response = handle_comparative_query(user_query, llm_response)
             if comparative_response:
-                print(f"[FAQ][ENHANCE] Comparative query detected - using formatted comparison")
                 final_response = comparative_response
             else:
-                # 2. Format to natural language
                 final_response = format_to_natural_language(llm_response, user_query)
-                if final_response != llm_response:
-                    print(f"[FAQ][ENHANCE] Response formatted to natural language")
-            
-            print(f"[FAQ][LLM] Final response: {len(final_response)} chars")
             
             # =========================================================
             # PHASE 3: STRUCTURED RESPONSE WITH CONFIDENCE SCORING
@@ -537,11 +545,9 @@ Respond naturally and completely:"""
             
             # Estimate confidence based on retrieval quality
             confidence = self._estimate_confidence(docs, context, llm_response)
-            print(f"[FAQ] Estimated confidence: {confidence:.2f}")
             
             # Escalation logic: After 2 failed clarifications, suggest ticket
             if clarification_count >= 2:
-                print(f"[FAQ] Escalation: {clarification_count} failed clarifications")
                 return AgentResponse.create(
                     status="needs_escalation",
                     message=f"{final_response}\n\n_If this doesn't answer your question, would you like to raise a ticket for personalized assistance?_",
@@ -554,8 +560,7 @@ Respond naturally and completely:"""
             
             # Low confidence warning
             if confidence < 0.6:
-                print(f"[FAQ] Low confidence detected ({confidence:.2f})")
-                return AgentResponse.create(
+                result = AgentResponse.create(
                     status="needs_input",
                     message=f"I found some information, but I'm not fully confident.\n\n{final_response}\n\nWould you like me to connect you with administration, or can you rephrase your question?",
                     metadata={
@@ -565,9 +570,11 @@ Respond naturally and completely:"""
                     },
                     next_expected="confirmation_or_rephrase"
                 )
+                # Don't cache low-confidence responses
+                return result
             
             # High confidence success
-            return AgentResponse.create(
+            result = AgentResponse.create(
                 status="success",
                 message=final_response,
                 resolved_entities={"query_type": "faq"},
@@ -581,6 +588,9 @@ Respond naturally and completely:"""
                     "query_enhanced": enhanced_query != user_query
                 }
             )
+            # Cache successful high-confidence responses
+            self._store_cache(cache_key, result)
+            return result
             
         except Exception as e:
             print(f"[FAQ][ERROR] {e}")

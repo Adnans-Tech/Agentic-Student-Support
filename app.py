@@ -67,10 +67,15 @@ orchestrator_agent = get_orchestrator()
 
 # Reuse orchestrator's email agent for OTP sending (avoids creating a duplicate)
 email_agent = orchestrator_agent.email_agent
+ticket_agent = orchestrator_agent.ticket_agent
 
 # Initialize faculty contact system
 print("\n[INFO] Initializing Faculty Contact System...")
 faculty_db = init_faculty_db()
+
+# Initialize email request service for faculty email routes
+from agents.email_request_service import EmailRequestService
+email_request_service = EmailRequestService()
 
 print("\n[OK] All agents initialized successfully\n")
 
@@ -1491,14 +1496,39 @@ def get_departments():
 
 @app.route('/api/faculty/list', methods=['GET'])
 def get_faculty_list():
-    """Get faculty filtered by department"""
+    """Get faculty list, optionally filtered by department"""
     try:
-        department = request.args.get('department', '')
+        department = request.args.get('department', '').strip()
         
-        if not department:
-            return jsonify({'success': False, 'error': 'Department parameter required'}), 400
+        if department:
+            faculty_list = faculty_db.get_faculty_by_department(department)
+        else:
+            # Return ALL faculty when no department filter
+            raw = faculty_db.get_all_faculty()
+            faculty_list = []
+            for f in raw:
+                # get_all_faculty returns dicts from dict cursor
+                if isinstance(f, dict):
+                    faculty_list.append({
+                        'faculty_id': f.get('faculty_id', ''),
+                        'name': f.get('name', ''),
+                        'designation': f.get('designation', ''),
+                        'department': f.get('department', ''),
+                        'contact': f.get('phone', '')
+                    })
+                else:
+                    faculty_list.append({
+                        'faculty_id': f[0],
+                        'name': f[1],
+                        'designation': f[3],
+                        'department': f[4],
+                        'contact': f[5] if len(f) > 5 else ''
+                    })
         
-        faculty_list = faculty_db.get_faculty_by_department(department)
+        # Normalize: frontend expects 'id' not 'faculty_id'
+        for f in faculty_list:
+            if 'faculty_id' in f and 'id' not in f:
+                f['id'] = f.pop('faculty_id')
         
         return jsonify({
             'success': True,
@@ -1560,9 +1590,8 @@ def send_faculty_email():
                     'max': max_allowed
                 }), 429
         
-        # Validate required fields
-        if not all([student_data['email'], student_data['name'], student_data['roll_no'],
-                   student_data['department'], student_data['year'], faculty_id, subject, message]):
+        # Validate required fields (only essential ones)
+        if not all([student_data['email'], faculty_id, subject, message]):
             return jsonify({
                 'success': False,
                 'message': 'Missing required fields'
@@ -1668,7 +1697,7 @@ def chat_orchestrator():
         
         # Try finding by Roll Number first (since 22AG1A66A8 is a Roll Number)
         cursor.execute("""
-            SELECT email, full_name, department, year 
+            SELECT email, full_name, roll_number, department, year 
             FROM students WHERE roll_number = ? OR email = ?
         """, (user_id, user_id))
         
@@ -1679,6 +1708,7 @@ def chat_orchestrator():
             "email": student["email"],
             "name": student["full_name"], # Normalized to 'name' for consistency
             "full_name": student["full_name"],
+            "roll_number": student["roll_number"],
             "department": student["department"],
             "year": student["year"]
         } if student else {"name": user_id, "email": user_id}
@@ -1745,7 +1775,7 @@ def confirm_chat_action():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT email, full_name, department, year 
+            SELECT email, full_name, roll_number, department, year 
             FROM students WHERE email = ?
         """, (user_id,))
         student = cursor.fetchone()
@@ -1754,6 +1784,7 @@ def confirm_chat_action():
         student_profile = {
             "email": student["email"],
             "full_name": student["full_name"],
+            "roll_number": student["roll_number"],
             "department": student["department"],
             "year": student["year"]
         } if student else {}
@@ -1850,6 +1881,7 @@ def get_chat_session(session_id):
         return jsonify({'error': str(e)}), 500
 
 
+
 if __name__ == '__main__':
     print("=" * 60)
     print("  ACE Engineering College - Student Support System")
@@ -1858,4 +1890,4 @@ if __name__ == '__main__':
     print("📝 Press Ctrl+C to stop the server\n")
     print("=" * 60)
     
-    app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5000)
+    app.run(debug=False, use_reloader=False, host='0.0.0.0', port=5000)

@@ -73,7 +73,9 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
                         {/* Recipient */}
                         <div className={styles.previewRow}>
                             <span className={styles.previewLabel}>To:</span>
-                            <span className={styles.previewValue}>{preview.to}</span>
+                            <span className={styles.previewValue}>
+                                {preview.to}
+                            </span>
                         </div>
 
                         {/* Subject - editable */}

@@ -96,8 +96,8 @@ const ChatSupport = () => {
         }
     };
 
-    const handleSendMessage = async (messageText = inputMessage) => {
-        if (!messageText.trim() || confirmationPending) return;
+    const handleSendMessage = async (messageText = inputMessage, force = false) => {
+        if (!messageText.trim() || (!force && confirmationPending)) return;
 
         const userMessage = {
             id: Date.now(),
@@ -175,7 +175,7 @@ const ChatSupport = () => {
         // Handle regenerate action — send as chat message, not confirmation
         if (editedDraft?.regenerate) {
             setConfirmationPending(null);
-            await handleSendMessage('regenerate');
+            await handleSendMessage('regenerate', true);
             return;
         }
 

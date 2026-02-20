@@ -442,33 +442,44 @@ class FacultyDatabase:
                     rows = cursor.fetchall()
                     print(f"[INFO] OR-based search found {len(rows)} results")
 
-                    # Score and sort: matches with more name parts rank higher
-                    if len(rows) > 1 and len(name_parts) > 1:
+                    # Strict word-boundary scoring: penalize fragment-only matches
+                    if rows:
                         scored_rows = []
                         for row in rows:
-                            name_lower = row[1].lower()
-                            score = sum(1 for part in name_parts if part in name_lower)
-                            scored_rows.append((score, row))
+                            # Split faculty name into individual words (remove honorifics like Dr., Prof.)
+                            raw_name = row[1].lower()
+                            faculty_words = [w.strip(".,") for w in raw_name.split()
+                                            if w.strip(".,") not in ("dr", "dr.", "prof", "prof.", "mr", "mr.", "mrs", "mrs.", "ms", "ms.")]
+                            score = 0
+                            for part in name_parts:
+                                # Full word match (highest confidence)
+                                if part in faculty_words:
+                                    score += 3
+                                # Prefix match: search part is prefix of a faculty word or vice versa (>= 4 chars)
+                                elif any((w.startswith(part) or part.startswith(w)) for w in faculty_words if len(w) >= 4 and len(part) >= 4):
+                                    score += 1
+                            if score > 0:
+                                scored_rows.append((score, row))
                         scored_rows.sort(key=lambda x: x[0], reverse=True)
                         rows = [r[1] for r in scored_rows]
-                        print(f"[INFO] Scored and sorted results by match count")
+                        print(f"[INFO] After word-boundary scoring: {len(rows)} results (filtered from OR)")
 
             # THIRD-TIER: Substring similarity for spelling variations (e.g., abdul vs abul)
-            # Only activate for name parts >= 5 chars to avoid short-fragment false positives
+            # Only activate for name parts >= 6 chars to avoid short-fragment false positives
             if len(rows) == 0 and name_parts:
-                long_parts = [p for p in name_parts if len(p) >= 5]
+                long_parts = [p for p in name_parts if len(p) >= 6]
                 if long_parts:
                     print(f"[INFO] Trying substring similarity search with long parts: {long_parts}")
                     sub_conditions = []
                     sub_params = []
                     for part in long_parts:
-                        # Use first 4 chars as fuzzy fragment (more selective than 3)
+                        # Use first 5 chars as fuzzy fragment (stricter than 4)
                         sub_conditions.append(f"LOWER(name) LIKE {ph}")
-                        sub_params.append(f"%{part[:4]}%")
-                        # Also try last 4 chars if part is long enough
-                        if len(part) >= 6:
+                        sub_params.append(f"%{part[:5]}%")
+                        # Also try last 5 chars if part is long enough
+                        if len(part) >= 8:
                             sub_conditions.append(f"LOWER(name) LIKE {ph}")
-                            sub_params.append(f"%{part[-4:]}%")
+                            sub_params.append(f"%{part[-5:]}%")
 
                     if sub_conditions:
                         sub_query = f"""
@@ -483,7 +494,7 @@ class FacultyDatabase:
                         print(f"[INFO] Substring similarity search found {len(rows)} results")
 
                         # STRICT FILTER: discard results where no original name part
-                        # shares >= 4 consecutive characters with any word in the faculty name
+                        # shares >= 5 consecutive characters with any word in the faculty name
                         if rows:
                             filtered_rows = []
                             for row in rows:
@@ -492,11 +503,11 @@ class FacultyDatabase:
                                 has_meaningful_match = False
                                 for part in name_parts:
                                     for word in name_words:
-                                        # Check for shared substring of length >= 4
+                                        # Check for shared substring of length >= 5
                                         min_len = min(len(part), len(word))
-                                        if min_len >= 4:
-                                            for i in range(len(part) - 3):
-                                                if part[i:i+4] in word:
+                                        if min_len >= 5:
+                                            for i in range(len(part) - 4):
+                                                if part[i:i+5] in word:
                                                     has_meaningful_match = True
                                                     break
                                         if has_meaningful_match:

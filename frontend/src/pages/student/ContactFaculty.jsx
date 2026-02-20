@@ -5,10 +5,9 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
 import studentService from '../../services/studentService';
 import { getCurrentUser } from '../../utils/auth';
-import { pageTransition, staggerContainer, staggerItem, modalBackdrop, modalContent } from '../../animations/variants';
+import { pageTransition, staggerContainer, staggerItem } from '../../animations/variants';
 import { LoadingState, EmptyState } from '../../components/dashboard/DashboardComponents';
 import Toast from '../../components/common/Toast';
 import styles from './ContactFaculty.module.css';
@@ -61,6 +60,7 @@ const ContactFaculty = () => {
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [emailForm, setEmailForm] = useState({ subject: '', message: '' });
     const [sending, setSending] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const loadQuota = async () => {
         try {
@@ -124,7 +124,14 @@ const ContactFaculty = () => {
         }
     };
 
-    const filteredFaculty = selectedDept === 'all' ? faculty : faculty.filter(f => f.department === selectedDept);
+    const filteredFaculty = (selectedDept === 'all' ? faculty : faculty.filter(f => f.department === selectedDept))
+        .filter(f => {
+            if (!searchQuery.trim()) return true;
+            const q = searchQuery.toLowerCase();
+            return (f.name || '').toLowerCase().includes(q) ||
+                (f.department || '').toLowerCase().includes(q) ||
+                (f.designation || '').toLowerCase().includes(q);
+        });
 
     return (
         <motion.div className={styles.contactFacultyPage} {...pageTransition}>
@@ -167,6 +174,20 @@ const ContactFaculty = () => {
                             {dept}
                         </button>
                     ))}
+                </div>
+
+                {/* Search Box */}
+                <div className={styles.searchContainer}>
+                    <div className={styles.searchWrapper}>
+                        <span className={styles.searchIcon}>🔍</span>
+                        <input
+                            type="text"
+                            className={styles.searchBox}
+                            placeholder="Search faculty by name, department..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
                 </div>
 
                 {/* Faculty Grid */}
@@ -217,131 +238,74 @@ const ContactFaculty = () => {
             <AnimatePresence>
                 {showEmailModal && selectedFaculty && (
                     <motion.div
-                        className="modal-backdrop"
-                        variants={modalBackdrop}
-                        initial="hidden"
-                        animate="visible"
-                        exit="exit"
+                        className={styles.modalOverlay}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
                         onClick={() => !sending && setShowEmailModal(false)}
-                        style={{
-                            position: 'fixed',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            zIndex: 1000,
-                            padding: '2rem'
-                        }}
                     >
                         <motion.div
-                            variants={modalContent}
+                            className={styles.modalContent}
+                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             onClick={(e) => e.stopPropagation()}
-                            style={{
-                                backgroundColor: 'var(--bg-primary)',
-                                borderRadius: '12px',
-                                width: '100%',
-                                maxWidth: '600px',
-                                padding: '2rem'
-                            }}
                         >
-                            <h2 style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>
+                            <h2 className={styles.modalTitle}>
                                 📧 Email {selectedFaculty.name}
                             </h2>
-                            <p style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                            <p className={styles.modalSubtitle}>
                                 {selectedFaculty.designation} • {selectedFaculty.department}
                             </p>
 
                             {/* Subject */}
-                            <div style={{ marginBottom: '1.5rem' }}>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: 'var(--text-primary)' }}>
-                                    Subject <span style={{ color: 'var(--accent-red)' }}>*</span>
+                            <div className={styles.formGroup}>
+                                <label className={styles.formLabel}>
+                                    Subject <span className={styles.required}>*</span>
                                 </label>
                                 <input
                                     type="text"
+                                    className={styles.formInput}
                                     value={emailForm.subject}
                                     onChange={(e) => setEmailForm(prev => ({ ...prev, subject: e.target.value }))}
                                     placeholder="Enter email subject"
                                     disabled={sending}
-                                    style={{
-                                        width: '100%',
-                                        padding: '0.75rem 1rem',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--border-color)',
-                                        backgroundColor: 'var(--bg-secondary)',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '1rem'
-                                    }}
                                 />
                             </div>
 
                             {/* Message */}
-                            <div style={{ marginBottom: '1.5rem' }}>
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: 'var(--text-primary)' }}>
-                                    Message <span style={{ color: 'var(--accent-red)' }}>*</span>
+                            <div className={styles.formGroup}>
+                                <label className={styles.formLabel}>
+                                    Message <span className={styles.required}>*</span>
                                 </label>
                                 <textarea
+                                    className={styles.formTextarea}
                                     value={emailForm.message}
                                     onChange={(e) => setEmailForm(prev => ({ ...prev, message: e.target.value }))}
                                     placeholder="Enter your message"
                                     disabled={sending}
                                     rows={8}
-                                    style={{
-                                        width: '100%',
-                                        padding: '0.75rem 1rem',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--border-color)',
-                                        backgroundColor: 'var(--bg-secondary)',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '1rem',
-                                        fontFamily: 'inherit',
-                                        resize: 'vertical'
-                                    }}
                                 />
                             </div>
 
                             {/* Action Buttons */}
-                            <div style={{ display: 'flex', gap: '1rem' }}>
+                            <div className={styles.modalActions}>
                                 <motion.button
+                                    className={styles.cancelBtn}
                                     onClick={() => setShowEmailModal(false)}
                                     disabled={sending}
                                     whileHover={{ scale: sending ? 1 : 1.02 }}
                                     whileTap={{ scale: sending ? 1 : 0.98 }}
-                                    style={{
-                                        flex: 1,
-                                        padding: '1rem',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--border-color)',
-                                        backgroundColor: 'var(--bg-secondary)',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '1rem',
-                                        fontWeight: '600',
-                                        cursor: sending ? 'not-allowed' : 'pointer'
-                                    }}
                                 >
                                     Cancel
                                 </motion.button>
 
                                 <motion.button
+                                    className={styles.sendBtn}
                                     onClick={handleSendFacultyEmail}
                                     disabled={sending || !emailForm.subject.trim() || !emailForm.message.trim()}
                                     whileHover={{ scale: (sending || !emailForm.subject.trim() || !emailForm.message.trim()) ? 1 : 1.02 }}
                                     whileTap={{ scale: (sending || !emailForm.subject.trim() || !emailForm.message.trim()) ? 1 : 0.98 }}
-                                    style={{
-                                        flex: 1,
-                                        padding: '1rem',
-                                        borderRadius: '8px',
-                                        border: 'none',
-                                        backgroundColor: 'var(--accent-primary)',
-                                        color: 'white',
-                                        fontSize: '1rem',
-                                        fontWeight: '600',
-                                        cursor: (sending || !emailForm.subject.trim() || !emailForm.message.trim()) ? 'not-allowed' : 'pointer',
-                                        opacity: (sending || !emailForm.subject.trim() || !emailForm.message.trim()) ? 0.6 : 1
-                                    }}
                                 >
                                     {sending ? '📤 Sending...' : '✉️ Send Email'}
                                 </motion.button>
