@@ -1,186 +1,517 @@
-/* Raise Ticket Styles */
+/* Raise Ticket Page - Theme-Aware Figma Design */
 
 .raiseTicketPage {
-    padding: var(--space-2xl);
-    max-width: 1000px;
+    padding: 28px 32px;
+    max-width: 1200px;
     margin: 0 auto;
+    min-height: 100vh;
 }
 
-.container {
-    width: 100%;
+/* === TAB BAR === */
+.tabBar {
+    display: flex;
+    gap: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 4px;
+    margin-bottom: 24px;
+    width: fit-content;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.3s ease, border-color 0.3s ease;
 }
 
-.header {
-    margin-bottom: var(--space-2xl);
-}
-
-.title {
-    font-size: var(--text-3xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text-primary);
-    margin-bottom: var(--space-xs);
-}
-
-.subtitle {
-    font-size: var(--text-base);
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
     color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.25s ease;
 }
 
-/* Form */
-.form {
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-xl);
+.tab:hover {
+    background: var(--color-hover);
+    color: var(--color-text-primary);
 }
 
+.tabActive {
+    background: var(--gradient-primary) !important;
+    color: white !important;
+    box-shadow: 0 2px 8px rgba(46, 203, 240, 0.25);
+}
+
+/* === FORM CARD === */
+.formCard {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 32px;
+    box-shadow: var(--shadow-card);
+    max-width: 700px;
+    transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.formCardHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 28px;
+}
+
+.formCardIcon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.formCardHeader h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 4px;
+}
+
+.formCardHeader p {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+/* === FORM ELEMENTS === */
 .formGroup {
-    margin-bottom: var(--space-lg);
+    margin-bottom: 20px;
 }
 
 .label {
     display: block;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text-primary);
-    margin-bottom: var(--space-xs);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.select,
-.textarea {
+.input,
+.textarea,
+.select {
     width: 100%;
-    background: var(--color-bg-primary);
+    padding: 12px 16px;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--text-base);
+    border-radius: 12px;
+    font-size: 14px;
     color: var(--color-text-primary);
-    font-family: inherit;
+    background: var(--color-bg-input);
+    transition: all 0.25s ease;
+    box-sizing: border-box;
 }
 
-.select:focus,
-.textarea:focus {
+.input:focus,
+.textarea:focus,
+.select:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(0, 188, 212, 0.1);
-}
-
-.select:disabled,
-.textarea:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
 }
 
 .textarea {
     resize: vertical;
-    line-height: 1.5;
+    min-height: 100px;
+    line-height: 1.6;
+    font-family: inherit;
 }
 
 .charCount {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    margin-top: 4px;
     text-align: right;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
 }
 
-/* Radio Group */
-.radioGroup {
+.error {
+    display: block;
+    font-size: 12px;
+    color: var(--color-error);
+    margin-top: 4px;
+}
+
+/* === PRIORITY PILLS === */
+.priorityPills {
     display: flex;
-    gap: var(--space-md);
+    gap: 8px;
     flex-wrap: wrap;
 }
 
-.radioLabel {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
+.priorityPill {
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
     cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--color-text-primary);
+    transition: all 0.25s ease;
 }
 
-.radioLabel input[type="radio"] {
-    cursor: pointer;
+.priorityPill:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
 }
 
-.radioLabel input[type="radio"]:disabled {
-    cursor: not-allowed;
+.priorityPillActive.pillLow {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+    border-color: var(--color-success);
 }
 
-/* Error */
-.error {
-    display: block;
+.priorityPillActive.pillMedium {
+    background: var(--color-info-bg);
+    color: var(--color-info);
+    border-color: var(--color-info);
+}
+
+.priorityPillActive.pillHigh {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+}
+
+.priorityPillActive.pillUrgent {
+    background: var(--color-error-bg);
     color: var(--color-error);
-    font-size: var(--text-xs);
-    margin-top: 4px;
+    border-color: var(--color-error);
 }
 
-/* Actions */
-.actions {
+/* === FORM ACTIONS === */
+.formActions {
     display: flex;
-    gap: var(--space-md);
-    margin-top: var(--space-xl);
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.cancelButton {
+    flex: 1;
+    padding: 12px;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.cancelButton:hover {
+    background: var(--color-hover);
 }
 
 .submitButton {
-    flex: 1;
-    background: var(--color-primary);
+    flex: 2;
+    padding: 12px;
+    background: var(--gradient-primary);
     color: white;
     border: none;
-    border-radius: var(--radius-md);
-    padding: var(--space-sm) var(--space-lg);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
     cursor: pointer;
-    box-shadow: var(--shadow-sm);
+    transition: all 0.25s ease;
+    box-shadow: 0 4px 16px rgba(46, 203, 240, 0.2);
 }
 
 .submitButton:hover:not(:disabled) {
-    background: var(--color-primary-dark);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 6px 20px rgba(46, 203, 240, 0.35);
+    transform: translateY(-1px);
 }
 
 .submitButton:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+    transform: none;
 }
 
-.cancelButton {
+/* === HISTORY === */
+.historyContainer {
+    max-width: 900px;
+}
+
+.historyHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.filterBar {
+    display: flex;
+    gap: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 3px;
+    transition: background 0.3s ease;
+}
+
+.filterBtn {
+    padding: 7px 16px;
+    border-radius: 9px;
+    border: none;
     background: transparent;
+    font-size: 13px;
+    font-weight: 500;
     color: var(--color-text-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-sm) var(--space-lg);
-    font-size: var(--text-base);
     cursor: pointer;
+    transition: all 0.2s;
 }
 
-.cancelButton:hover:not(:disabled) {
-    background: var(--color-bg-tertiary);
-    border-color: var(--color-text-secondary);
+.filterBtn:hover {
+    background: var(--color-hover);
 }
 
-.cancelButton:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+.filterActive {
+    background: var(--color-primary) !important;
+    color: white !important;
+    box-shadow: 0 2px 6px rgba(46, 203, 240, 0.2);
 }
 
-/* Responsive */
+.closeAllBtn {
+    padding: 8px 20px;
+    background: var(--color-error-bg);
+    color: var(--color-error);
+    border: 1px solid var(--color-error);
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.closeAllBtn:hover {
+    background: var(--color-error);
+    color: white;
+}
+
+/* === TICKET CARDS === */
+.ticketsList {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ticketCard {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.25s ease;
+}
+
+.ticketCard:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.ticketCardHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.ticketCardHeader h4 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 4px;
+}
+
+.ticketCardHeader p {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+.ticketBadges {
+    display: flex;
+    gap: 6px;
+}
+
+.badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    text-transform: capitalize;
+}
+
+.statusOpen {
+    background: var(--color-info-bg);
+    color: var(--color-info);
+}
+
+.statusProgress {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+
+.statusResolved {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.statusClosed {
+    background: var(--color-disabled);
+    color: var(--color-text-muted);
+}
+
+.priorityHigh {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+}
+
+.priorityMedium {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+
+.priorityLow {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
+.ticketDesc {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin: 0 0 14px;
+}
+
+.ticketFooter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ticketMeta {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.closeTicketBtn {
+    padding: 6px 16px;
+    background: var(--color-error-bg);
+    color: var(--color-error);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.closeTicketBtn:hover {
+    background: var(--color-error);
+    color: white;
+}
+
+/* === DIALOG === */
+.dialogOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+}
+
+.confirmDialog {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    padding: 32px;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: var(--shadow-xl);
+}
+
+.dialogIcon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+.confirmDialog h3 {
+    font-size: 18px;
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+}
+
+.confirmDialog p {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin-bottom: 24px;
+}
+
+.dialogActions {
+    display: flex;
+    gap: 12px;
+}
+
+.confirmBtn {
+    flex: 1;
+    padding: 12px;
+    background: var(--color-error);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.confirmBtn:hover {
+    opacity: 0.9;
+}
+
+/* === RESPONSIVE === */
 @media (max-width: 768px) {
     .raiseTicketPage {
-        padding: var(--space-lg);
+        padding: 20px 16px;
     }
 
-    .form {
-        padding: var(--space-lg);
+    .tabBar {
+        width: 100%;
     }
 
-    .actions {
+    .tab {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .historyHeader {
         flex-direction: column;
     }
 
-    .radioGroup {
-        flex-direction: column;
-        gap: var(--space-sm);
+    .filterBar {
+        overflow-x: auto;
     }
 }

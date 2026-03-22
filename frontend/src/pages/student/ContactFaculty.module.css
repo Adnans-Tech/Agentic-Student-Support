@@ -1,371 +1,419 @@
-/* Contact Faculty Styles */
+/* Contact Faculty - Theme-Aware Figma Design */
 
 .contactFacultyPage {
-    padding: var(--space-2xl);
-    max-width: 1200px;
+    padding: 28px 32px;
+    max-width: 1400px;
     margin: 0 auto;
+    min-height: 100vh;
 }
 
 .container {
     width: 100%;
 }
 
+/* === HEADER === */
 .header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: var(--space-xl);
-    gap: var(--space-md);
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
 }
 
 .title {
-    font-size: var(--text-3xl);
-    font-weight: var(--font-bold);
+    font-size: 28px;
+    font-weight: 700;
     color: var(--color-text-primary);
-    margin-bottom: var(--space-xs);
+    margin: 0;
 }
 
 .subtitle {
-    font-size: var(--text-base);
+    font-size: 14px;
     color: var(--color-text-secondary);
+    margin: 4px 0 0;
 }
 
 .quotaCard {
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-md);
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 10px;
+    padding: 10px 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .quotaLabel {
-    font-size: var(--text-xs);
+    font-size: 13px;
     color: var(--color-text-secondary);
 }
 
 .quotaValue {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
+    font-size: 16px;
+    font-weight: 700;
     color: var(--color-primary);
 }
 
+/* === DEPARTMENT FILTER === */
 .filters {
     display: flex;
-    gap: var(--space-sm);
-    margin-bottom: var(--space-2xl);
+    gap: 6px;
     flex-wrap: wrap;
+    margin-bottom: 20px;
 }
 
 .filterButton {
-    background: var(--color-bg-secondary);
+    padding: 8px 18px;
+    border-radius: 20px;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--text-sm);
+    background: var(--color-bg-secondary);
+    font-size: 13px;
+    font-weight: 500;
     color: var(--color-text-secondary);
     cursor: pointer;
-    transition: all var(--transition-base);
+    transition: all 0.25s ease;
 }
 
 .filterButton:hover {
-    background: var(--color-bg-tertiary);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
 }
 
 .filterButton.active {
-    background: var(--color-primary);
+    background: var(--gradient-primary);
     color: white;
-    border-color: var(--color-primary);
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(46, 203, 240, 0.25);
 }
 
-.facultyGrid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: var(--space-lg);
-}
-
-.facultyCard {
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-lg);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-md);
-    transition: all var(--transition-base);
-}
-
-.facultyCard:hover {
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-md);
-}
-
-.facultyAvatar {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    background: var(--color-primary);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-3xl);
-    font-weight: var(--font-bold);
-}
-
-.facultyInfo {
-    text-align: center;
-    width: 100%;
-}
-
-.facultyName {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-primary);
-    margin-bottom: 4px;
-}
-
-.facultyDesignation {
-    font-size: var(--text-sm);
-    color: var(--color-primary);
-    margin-bottom: var(--space-xs);
-}
-
-.facultyDepartment,
-.facultyContact {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin-bottom: 4px;
-}
-
-.emailButton {
-    width: 100%;
-    background: var(--color-primary);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    padding: var(--space-sm);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    cursor: pointer;
-    transition: all var(--transition-base);
-}
-
-.emailButton:hover:not(:disabled) {
-    background: var(--color-primary-dark);
-}
-
-.emailButton:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-@media (max-width: 768px) {
-    .contactFacultyPage {
-        padding: var(--space-lg);
-    }
-
-    .header {
-        flex-direction: column;
-    }
-
-    .facultyGrid {
-        grid-template-columns: 1fr;
-    }
-
-    .searchBox {
-        width: 100%;
-    }
-}
-
-/* Search Box */
+/* === SEARCH === */
 .searchContainer {
-    margin-bottom: var(--space-lg);
-}
-
-.searchBox {
-    width: 100%;
-    padding: 0.85rem 1.2rem 0.85rem 2.8rem;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--color-border);
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    transition: all var(--transition-base);
-    outline: none;
-}
-
-.searchBox::placeholder {
-    color: var(--color-text-secondary);
-    opacity: 0.7;
-}
-
-.searchBox:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(0, 200, 200, 0.15);
+    margin-bottom: 24px;
 }
 
 .searchWrapper {
     position: relative;
-    max-width: 480px;
+    max-width: 500px;
 }
 
 .searchIcon {
     position: absolute;
-    left: 1rem;
+    left: 16px;
     top: 50%;
     transform: translateY(-50%);
-    color: var(--color-text-secondary);
-    font-size: 1.1rem;
-    pointer-events: none;
+    font-size: 16px;
 }
 
-/* Modal Overlay (solid background) */
+.searchBox {
+    width: 100%;
+    padding: 12px 16px 12px 44px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 14px;
+    color: var(--color-text-primary);
+    background: var(--color-bg-input);
+    transition: all 0.25s ease;
+    box-sizing: border-box;
+}
+
+.searchBox:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
+}
+
+.searchBox::placeholder {
+    color: var(--color-text-muted);
+}
+
+/* === FACULTY GRID — Figma Card Design === */
+.facultyGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.facultyCard {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    transition: all 0.25s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.facultyCard:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+/* Colored header band per card */
+.facultyCard:nth-child(6n+1) {
+    border-top: 3px solid #2ECBF0;
+}
+
+.facultyCard:nth-child(6n+2) {
+    border-top: 3px solid #8B5CF6;
+}
+
+.facultyCard:nth-child(6n+3) {
+    border-top: 3px solid #F59E0B;
+}
+
+.facultyCard:nth-child(6n+4) {
+    border-top: 3px solid #EC4899;
+}
+
+.facultyCard:nth-child(6n+5) {
+    border-top: 3px solid #10B981;
+}
+
+.facultyCard:nth-child(6n+6) {
+    border-top: 3px solid #6366F1;
+}
+
+.facultyAvatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    margin: 20px auto 0;
+    flex-shrink: 0;
+}
+
+/* Cycle avatar background colors */
+.facultyCard:nth-child(6n+1) .facultyAvatar {
+    background: linear-gradient(135deg, #2ECBF0, #36D1DC);
+}
+
+.facultyCard:nth-child(6n+2) .facultyAvatar {
+    background: linear-gradient(135deg, #8B5CF6, #A78BFA);
+}
+
+.facultyCard:nth-child(6n+3) .facultyAvatar {
+    background: linear-gradient(135deg, #F59E0B, #FBBF24);
+}
+
+.facultyCard:nth-child(6n+4) .facultyAvatar {
+    background: linear-gradient(135deg, #EC4899, #F472B6);
+}
+
+.facultyCard:nth-child(6n+5) .facultyAvatar {
+    background: linear-gradient(135deg, #10B981, #34D399);
+}
+
+.facultyCard:nth-child(6n+6) .facultyAvatar {
+    background: linear-gradient(135deg, #6366F1, #818CF8);
+}
+
+.facultyInfo {
+    padding: 16px 20px;
+    text-align: center;
+    flex: 1;
+}
+
+.facultyName {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 4px;
+}
+
+.facultyDesignation {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 8px;
+}
+
+.facultyDepartment,
+.facultyContact {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin: 2px 0;
+}
+
+.emailButton {
+    margin: 0 20px 20px;
+    padding: 10px;
+    background: var(--color-text-primary);
+    color: var(--color-bg-primary);
+    border: none;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.emailButton:hover:not(:disabled) {
+    opacity: 0.85;
+    transform: translateY(-1px);
+}
+
+.emailButton:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* === EMAIL MODAL === */
 .modalOverlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
-    padding: 2rem;
+    z-index: 1050;
+    padding: 20px;
 }
 
 .modalContent {
-    background: #1a1a2e;
-    border: 1px solid var(--color-border);
-    border-radius: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    padding: 32px;
+    max-width: 560px;
     width: 100%;
-    max-width: 600px;
-    padding: 2rem;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-xl);
 }
 
 .modalTitle {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
+    font-size: 20px;
+    font-weight: 700;
     color: var(--color-text-primary);
-    margin-bottom: 0.5rem;
+    margin: 0 0 4px;
 }
 
 .modalSubtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin-bottom: 1.5rem;
+    font-size: 14px;
+    color: var(--color-text-muted);
+    margin: 0 0 24px;
 }
 
 .formGroup {
-    margin-bottom: 1.5rem;
+    margin-bottom: 18px;
 }
 
 .formLabel {
     display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    font-size: var(--text-sm);
-}
-
-.formLabel .required {
-    color: #ef4444;
-}
-
-.formInput {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    transition: border-color var(--transition-base);
-    outline: none;
-}
-
-.formInput:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px rgba(0, 200, 200, 0.15);
-}
-
-.formInput::placeholder {
+    font-size: 13px;
+    font-weight: 600;
     color: var(--color-text-secondary);
-    opacity: 0.6;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.required {
+    color: var(--color-error);
+}
+
+.formInput,
+.formTextarea {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 14px;
+    color: var(--color-text-primary);
+    background: var(--color-bg-input);
+    transition: all 0.25s ease;
+    box-sizing: border-box;
+}
+
+.formInput:focus,
+.formTextarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
 }
 
 .formTextarea {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    font-family: inherit;
     resize: vertical;
-    transition: border-color var(--transition-base);
-    outline: none;
-}
-
-.formTextarea:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px rgba(0, 200, 200, 0.15);
-}
-
-.formTextarea::placeholder {
-    color: var(--color-text-secondary);
-    opacity: 0.6;
+    min-height: 140px;
+    line-height: 1.6;
+    font-family: inherit;
 }
 
 .modalActions {
     display: flex;
-    gap: 1rem;
+    gap: 12px;
+    margin-top: 8px;
 }
 
 .cancelBtn {
     flex: 1;
-    padding: 0.85rem;
-    border-radius: var(--radius-md);
+    padding: 12px;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
     border: 1px solid var(--color-border);
-    background: transparent;
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
+    border-radius: 12px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--transition-base);
+    transition: all 0.25s ease;
 }
 
-.cancelBtn:hover:not(:disabled) {
-    background: var(--color-bg-secondary);
+.cancelBtn:hover {
+    background: var(--color-hover);
 }
 
 .sendBtn {
     flex: 1;
-    padding: 0.85rem;
-    border-radius: var(--radius-md);
-    border: none;
-    background: var(--color-primary);
+    padding: 12px;
+    background: var(--gradient-primary);
     color: white;
-    font-size: var(--text-base);
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--transition-base);
+    transition: all 0.25s ease;
+    box-shadow: 0 3px 12px rgba(46, 203, 240, 0.2);
 }
 
 .sendBtn:hover:not(:disabled) {
-    filter: brightness(1.1);
+    box-shadow: 0 5px 16px rgba(46, 203, 240, 0.35);
 }
 
-.sendBtn:disabled,
-.cancelBtn:disabled {
+.sendBtn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+    .contactFacultyPage {
+        padding: 20px 16px;
+    }
+
+    .facultyGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .filters {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+    }
 }

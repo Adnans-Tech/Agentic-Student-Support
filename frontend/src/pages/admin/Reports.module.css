@@ -1,0 +1,220 @@
+/* Reports Styles */
+
+.pageContainer {
+    padding: 28px 32px;
+    max-width: 1280px;
+    margin: 0 auto;
+    min-height: 100vh;
+}
+
+.pageHeader {
+    margin-bottom: 28px;
+}
+
+.pageHeader h1 {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+}
+
+.pageHeader p {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+/* ===== GRID ===== */
+.reportsGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+
+/* ===== CARD ===== */
+.reportCard {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+}
+
+.cardTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cardIcon {
+    color: var(--color-primary);
+}
+
+/* ===== EMAIL STATS STYLES ===== */
+.emailStatsContainer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.emailStatGroup {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.statRole {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.statNumber {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+.statLabel {
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.statRow {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--color-bg-tertiary);
+    border-radius: 8px;
+    margin-top: 16px;
+    font-size: 13px;
+}
+
+.statRow span:first-child {
+    color: var(--color-text-secondary);
+}
+
+.statRow span:last-child {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+/* ===== TICKET TABLE STYLES ===== */
+.tableWrapper {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+}
+
+.ticketsTable {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 14px;
+}
+
+.ticketsTable th {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.ticketsTable td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+}
+
+.ticketsTable tr:last-child td {
+    border-bottom: none;
+}
+
+.deptName {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    min-width: 40px;
+}
+
+.badge.open {
+    background: rgba(245, 158, 11, 0.12);
+    color: #F59E0B;
+}
+
+.badge.inProgress {
+    background: rgba(59, 130, 246, 0.12);
+    color: #3B82F6;
+}
+
+.badge.resolved {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10B981;
+}
+
+.badge.closed {
+    background: rgba(107, 114, 128, 0.12);
+    color: #6B7280;
+}
+
+/* Loading */
+.fullPageLoader {
+    display: flex;
+    justify-content: center;
+    padding: 60px;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.emptyState {
+    text-align: center;
+    padding: 32px;
+    color: var(--color-text-muted);
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 1024px) {
+    .reportsGrid {
+        grid-template-columns: 1fr;
+    }
+}

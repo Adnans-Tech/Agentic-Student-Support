@@ -4,7 +4,7 @@
  */
 
 import { Navigate } from 'react-router-dom';
-import { isAuthenticated, hasRole } from '../../utils/auth';
+import { isAuthenticated, hasRole, getDefaultRoute } from '../../utils/auth';
 
 const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     const isAuth = isAuthenticated();
@@ -20,8 +20,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
 
         if (!userHasRole) {
             // Unauthorized - redirect to appropriate dashboard
-            const userRole = hasRole('student') ? 'student' : 'faculty';
-            return <Navigate to={`/${userRole}/dashboard`} replace />;
+            return <Navigate to={getDefaultRoute()} replace />;
         }
     }
 

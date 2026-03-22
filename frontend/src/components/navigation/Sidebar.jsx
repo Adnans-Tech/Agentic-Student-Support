@@ -1,56 +1,97 @@
 /**
- * Student Sidebar Navigation
- * Fixed sidebar with navigation links and user info
- * Now with collapse/expand functionality and Lucide React icons
+ * Sidebar Navigation — Role-Aware (Student & Faculty)
+ * Shows different nav items, branding, and accent colors based on user role
  */
 
-import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
-    Home,
+    LayoutDashboard,
     MessageCircle,
-    Mail,
+    Send,
     Ticket,
-    ClipboardList,
-    UserCircle,
-    Inbox,
     Users,
-    Power,
+    UserCircle,
+    LogOut,
     Menu,
-    X
+    X,
+    Mail,
+    Calendar,
+    Bot,
+    Inbox,
+    Megaphone,
+    BarChart3
 } from 'lucide-react';
-import { getCurrentUser } from '../../utils/auth';
+import { getCurrentUser, isAdmin } from '../../utils/auth';
 import authService from '../../services/authService';
 import styles from './Sidebar.module.css';
 
-const Sidebar = () => {
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+const STUDENT_NAV = [
+    { path: '/student/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/student/chat', icon: MessageCircle, label: 'Chat Support' },
+    { path: '/student/emails', icon: Send, label: 'Send Email' },
+    { path: '/student/tickets/new', icon: Ticket, label: 'Raise Ticket' },
+    { path: '/student/contact-faculty', icon: Users, label: 'Contact Faculty' },
+    { path: '/student/profile', icon: UserCircle, label: 'My Profile' },
+];
+
+const FACULTY_NAV = [
+    { path: '/faculty/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/faculty/assistant', icon: Bot, label: 'Faculty Assistant' },
+    { path: '/faculty/tickets', icon: Ticket, label: 'Ticket Inbox' },
+    { path: '/faculty/inbox', icon: Mail, label: 'Email Inbox' },
+    { path: '/faculty/profile', icon: UserCircle, label: 'Profile' },
+];
+
+const ADMIN_NAV = [
+    { path: '/admin/dashboard', icon: LayoutDashboard, label: 'Admin Dashboard' },
+    { path: '/admin/users', icon: Users, label: 'User Directory' },
+    { path: '/admin/tickets', icon: Ticket, label: 'Ticket Oversight' },
+    { path: '/admin/announcements', icon: Megaphone, label: 'Announcements' },
+    { path: '/admin/reports', icon: BarChart3, label: 'System Reports' },
+];
+const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     const navigate = useNavigate();
+    const location = useLocation();
     const user = getCurrentUser();
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const isUserAdmin = isAdmin();
+    const isFaculty = user?.role === 'faculty';
+
+    const isFacultyRoute = location.pathname.startsWith('/faculty');
+    const isAdminRoute = location.pathname.startsWith('/admin');
+
+    // Choose nav based on location if user is admin, otherwise fallback to role
+    let navItems = STUDENT_NAV;
+    if (isUserAdmin) {
+        // Admins see navigation based on where they are in the app
+        navItems = isFacultyRoute ? FACULTY_NAV : ADMIN_NAV;
+    } else if (isFaculty) {
+        navItems = FACULTY_NAV;
+    }
 
     const handleLogout = () => {
         authService.logout();
         navigate('/login');
     };
 
-    const toggleSidebar = () => {
-        setIsCollapsed(!isCollapsed);
+    // Build profile photo URL
+    let photoUrl = null;
+    try {
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        if (storedUser.profile_photo) {
+            photoUrl = `${API_BASE}${storedUser.profile_photo}`;
+        }
+    } catch { }
+
+    const getInitials = (name) => {
+        if (!name) return '?';
+        return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
     };
 
-    const navItems = [
-        { path: '/student/dashboard', icon: Home, label: 'Dashboard' },
-        { path: '/student/chat', icon: MessageCircle, label: 'Chat Support' },
-        { path: '/student/emails', icon: Mail, label: 'Send Email' },
-        { path: '/student/tickets/new', icon: Ticket, label: 'Raise Ticket' },
-        { path: '/student/tickets', icon: ClipboardList, label: 'Ticket History', end: true },
-        { path: '/student/contact-faculty', icon: Users, label: 'Contact Faculty' },
-        { path: '/student/email-history', icon: Inbox, label: 'Email History' },
-        { path: '/student/profile', icon: UserCircle, label: 'My Profile' },
-    ];
-
     return (
-        <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''}`}>
+        <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''} ${isFaculty ? styles.facultySidebar : ''} ${isUserAdmin ? styles.adminSidebar : ''}`}>
             {/* Toggle Button */}
             <motion.button
                 className={styles.toggleButton}
@@ -60,27 +101,15 @@ const Sidebar = () => {
                 title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-                {isCollapsed ? <Menu size={20} /> : <X size={20} />}
+                {isCollapsed ? <Menu size={18} /> : <X size={18} />}
             </motion.button>
 
-            {/* Header */}
+            {/* Header: Logo + Brand */}
             <div className={styles.header}>
                 <img src="/ace_logo.png" alt="ACE Logo" className={styles.logo} />
-                <AnimatePresence>
-                    {!isCollapsed && (
-                        <motion.div
-                            className={styles.userInfo}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                        >
-                            <h3 className={styles.userName}>{user?.full_name || user?.name}</h3>
-                            <p className={styles.userRoll}>{user?.roll_number}</p>
-                            <span className={styles.userBadge}>Student</span>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                <div className={styles.brandWrapper}>
+                    <span className={styles.brandName}>ACE</span>
+                </div>
             </div>
 
             {/* Navigation */}
@@ -91,26 +120,39 @@ const Sidebar = () => {
                         <NavLink
                             key={item.path}
                             to={item.path}
-                            end={item.end}
                             className={({ isActive }) =>
-                                `${styles.navItem} ${isActive ? styles.active : ''}`
+                                `${styles.navItem} ${isActive ? styles.active : ''} ${isFacultyRoute && isActive ? styles.facultyActive : ''} ${isAdminRoute && isActive ? styles.adminActive : ''}`
                             }
                         >
-                            <motion.div
+                            <div
                                 className={styles.navContent}
-                                whileHover={{ x: 4 }}
-                                whileTap={{ scale: 0.98 }}
+                                title={isCollapsed ? item.label : undefined}
                             >
                                 <Icon className={styles.navIcon} size={20} strokeWidth={2} />
                                 <span className={styles.navLabel}>{item.label}</span>
-                            </motion.div>
+                            </div>
                         </NavLink>
                     );
                 })}
             </nav>
 
-            {/* Footer - Logout */}
+            {/* Footer: User Profile + Logout */}
             <div className={styles.footer}>
+                <div className={styles.userSection}>
+                    {photoUrl ? (
+                        <img src={photoUrl} alt="Profile" className={styles.userAvatar} />
+                    ) : (
+                        <div className={styles.userAvatarPlaceholder}>
+                            {getInitials(user?.full_name || user?.name)}
+                        </div>
+                    )}
+                    <div className={styles.userInfoWrapper}>
+                        <span className={styles.userName}>{user?.full_name || user?.name}</span>
+                        <span className={styles.userRole}>
+                            {isUserAdmin ? 'Admin' : (isFaculty ? 'Faculty' : 'Student')}
+                        </span>
+                    </div>
+                </div>
                 <motion.button
                     onClick={handleLogout}
                     className={styles.logoutButton}
@@ -119,7 +161,7 @@ const Sidebar = () => {
                     aria-label="Logout"
                     title="Logout"
                 >
-                    <Power size={20} strokeWidth={2} />
+                    <LogOut size={18} strokeWidth={2} />
                 </motion.button>
             </div>
         </aside>

@@ -209,6 +209,18 @@ const TicketHistory = () => {
 
                                 <p className={styles.ticketDescription}>{ticket.description}</p>
 
+                                {ticket.status?.toLowerCase() === 'resolved' && ticket.resolution_note && (
+                                    <div className={styles.resolutionContainer}>
+                                        <h4 className={styles.resolutionTitle}>✅ Resolution</h4>
+                                        <p className={styles.resolutionNote}>{ticket.resolution_note}</p>
+                                        {ticket.resolved_at && (
+                                            <span className={styles.resolutionDate}>
+                                                Resolved on {new Date(ticket.resolved_at).toLocaleString()}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+
                                 <div className={styles.ticketFooter}>
                                     <div className={styles.ticketMeta}>
                                         <span className={styles.ticketDepartment}>🏢 {ticket.department}</span>

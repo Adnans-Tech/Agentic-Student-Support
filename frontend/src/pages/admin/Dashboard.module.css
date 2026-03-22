@@ -1,0 +1,541 @@
+/* Admin Dashboard Styles - Redesigned */
+
+.dashboardContainer {
+    padding: 28px 32px;
+    max-width: 1280px;
+    margin: 0 auto;
+    min-height: 100vh;
+}
+
+.pageHeader {
+    margin-bottom: 24px;
+}
+
+.pageHeader h1 {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+}
+
+.pageHeader p {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+/* ===== UNIFIED SYSTEM PULSE CARD ===== */
+.unifiedCard {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+.unifiedHeader {
+    padding: 24px 28px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(to right, rgba(23, 23, 31, 0.4), transparent);
+}
+
+.unifiedTitleGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.unifiedTitle {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
+
+.titleIcon {
+    color: #3B82F6;
+    /* Optional slightly themed icon */
+}
+
+.unifiedSubtitle {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-left: 30px;
+}
+
+/* Integrated Stats Row */
+.integratedStatsRow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background: var(--color-bg-secondary);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.integratedStat {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 28px;
+    border-right: 1px solid var(--color-border);
+}
+
+.integratedStat:last-child {
+    border-right: none;
+}
+
+.iStatIcon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.iStatIcon.green {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10B981;
+}
+
+.iStatIcon.blue {
+    background: rgba(59, 130, 246, 0.12);
+    color: #3B82F6;
+}
+
+.iStatIcon.amber {
+    background: rgba(245, 158, 11, 0.12);
+    color: #F59E0B;
+}
+
+.iStatIcon.purple {
+    background: rgba(139, 92, 246, 0.12);
+    color: #8B5CF6;
+}
+
+.iStatData {
+    display: flex;
+    flex-direction: column;
+}
+
+.iStatLabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.iStatValue {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    line-height: 1;
+}
+
+/* Chart Area */
+.chartAreaWrapper {
+    padding: 24px 28px 28px;
+}
+
+.chartHeaderRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 20px;
+}
+
+.chartTitle {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 0;
+}
+
+.trendPills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.trendPill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+}
+
+.pillDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.pillAmber {
+    border-color: rgba(245, 158, 11, 0.25);
+    color: #F59E0B;
+}
+
+.pillGreen {
+    border-color: rgba(16, 185, 129, 0.25);
+    color: #10B981;
+}
+
+.pillRatio {
+    border-color: rgba(59, 130, 246, 0.25);
+    color: #3B82F6;
+}
+
+.chartContainer {
+    width: 100%;
+    height: 320px;
+    margin-top: 4px;
+}
+
+/* Custom Tooltip */
+.chartTooltip {
+    background: rgba(15, 15, 25, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 12px 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    min-width: 140px;
+}
+
+.tooltipLabel {
+    font-size: 13px;
+    font-weight: 600;
+    color: #E5E7EB;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tooltipRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.tooltipDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.tooltipName {
+    font-size: 12px;
+    color: #9CA3AF;
+    flex: 1;
+}
+
+.tooltipValue {
+    font-size: 13px;
+    font-weight: 700;
+    color: #F3F4F6;
+}
+
+/* Skeleton Loading */
+.chartSkeleton {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    height: 320px;
+    padding: 20px 0;
+}
+
+.skeletonBar {
+    flex: 1;
+    border-radius: 8px 8px 4px 4px;
+    background: linear-gradient(180deg, var(--color-bg-secondary) 0%, var(--color-bg-tertiary, var(--color-bg-secondary)) 100%);
+    opacity: 0.5;
+    animation: skeletonPulse 1.6s ease-in-out infinite;
+}
+
+.skeletonBar:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.skeletonBar:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+.skeletonBar:nth-child(4) {
+    animation-delay: 0.3s;
+}
+
+.skeletonBar:nth-child(5) {
+    animation-delay: 0.4s;
+}
+
+.skeletonBar:nth-child(6) {
+    animation-delay: 0.5s;
+}
+
+.skeletonBar:nth-child(7) {
+    animation-delay: 0.6s;
+}
+
+.skeletonBar:nth-child(8) {
+    animation-delay: 0.7s;
+}
+
+@keyframes skeletonPulse {
+
+    0%,
+    100% {
+        opacity: 0.25;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Chart Empty State */
+.chartEmpty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 260px;
+    gap: 10px;
+    color: var(--color-text-muted);
+}
+
+.chartEmpty p {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 0;
+}
+
+.chartEmpty span {
+    font-size: 13px;
+    opacity: 0.7;
+}
+
+/* ===== COLLAPSIBLE ACTIVITY ACCORDION ===== */
+.activityAccordion {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.accordionToggle {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-primary);
+    transition: background-color 0.2s ease;
+}
+
+.accordionToggle:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.accordionToggle.expanded {
+    border-bottom: 1px solid var(--color-border);
+}
+
+.toggleLeft {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.toggleIcon {
+    color: var(--color-text-secondary);
+}
+
+.toggleRight {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: var(--color-text-secondary);
+}
+
+.activityBadge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+}
+
+.accordionContentWrapper {
+    overflow: hidden;
+}
+
+.accordionContent {
+    padding: 0 24px 16px;
+}
+
+/* ===== RECENT ACTIVITY LIST ===== */
+.recentList {
+    display: flex;
+    flex-direction: column;
+}
+
+.recentItem {
+    padding: 16px 0;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.recentItem:last-child {
+    border-bottom: none;
+    padding-bottom: 8px;
+    /* Slight padding at the very end to match top padding visually inside the list */
+}
+
+.recentIcon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+}
+
+.recentInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.recentTitle {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.recentTitle strong {
+    font-weight: 600;
+    color: #E5E7EB;
+}
+
+.recentMeta {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+}
+
+.recentTime {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+.emptyState {
+    text-align: center;
+    padding: 32px 0;
+    color: var(--color-text-muted);
+    font-size: 14px;
+}
+
+/* ===== LOADING & ERROR ===== */
+.loadingContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    gap: 16px;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--color-border);
+    border-top-color: #F59E0B;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.errorState {
+    background: var(--color-error-bg);
+    color: var(--color-error);
+    padding: 24px;
+    border-radius: 12px;
+    text-align: center;
+    max-width: 500px;
+    margin: 40px auto;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 1024px) {
+    .integratedStatsRow {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .integratedStat:nth-child(2) {
+        border-right: none;
+    }
+
+    .integratedStat:nth-child(1),
+    .integratedStat:nth-child(2) {
+        border-bottom: 1px solid var(--color-border);
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboardContainer {
+        padding: 16px;
+    }
+
+    .integratedStatsRow {
+        grid-template-columns: 1fr;
+    }
+
+    .integratedStat {
+        border-right: none !important;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .integratedStat:last-child {
+        border-bottom: none;
+    }
+
+    .chartHeaderRow {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+}

@@ -1,71 +1,93 @@
-/* Design Tokens - ACE Engineering College */
+/* Design Tokens - ACE Engineering College — Dual Theme System */
 
+/* ============================
+   LIGHT THEME (Default — Figma)
+   ============================ */
+[data-theme="light"],
 :root {
-    /* === COLORS === */
+    /* Primary - ACE Brand Cyan/Blue */
+    --color-primary: #2ECBF0;
+    --color-primary-light: #5BD8F5;
+    --color-primary-dark: #1BA8CC;
+    --color-primary-rgb: 46, 203, 240;
 
-    /* Primary - ACE Brand Cyan */
-    --color-primary: #00BCD4;
-    --color-primary-light: #4DD0E1;
-    --color-primary-dark: #0097A7;
-    --color-primary-rgb: 0, 188, 212;
+    /* Accent Gradient */
+    --gradient-primary: linear-gradient(135deg, #2ECBF0, #667EEA);
+    --gradient-hero: linear-gradient(135deg, #2ECBF0 0%, #667EEA 50%, #8B5CF6 100%);
+    --gradient-active: linear-gradient(135deg, #2ECBF0, #36D1DC);
 
-    /* Backgrounds - Improved Visibility (Off-Black) */
-    --color-bg-primary: #1A1A1A;
-    --color-bg-secondary: #242424;
-    --color-bg-tertiary: #2A2A2A;
-    --color-bg-elevated: #2E2E2E;
+    /* Backgrounds */
+    --color-bg-primary: #EEF2FB;
+    --color-bg-secondary: #FFFFFF;
+    --color-bg-tertiary: #F7F9FC;
+    --color-bg-elevated: #FFFFFF;
+    --color-bg-sidebar: #FFFFFF;
+    --color-bg-input: #F7F9FC;
+    --color-bg-chat: #F0F4FA;
+    --color-bg-msg-ai: #FFFFFF;
+    --color-bg-msg-user: linear-gradient(135deg, #2ECBF0, #667EEA);
 
-    /* Text Colors - WCAG AA Contrast */
-    --color-text-primary: #FFFFFF;
-    --color-text-secondary: #E0E0E0;
-    --color-text-muted: #A0A0A0;
-    --color-text-disabled: #666666;
+    /* Text Colors */
+    --color-text-primary: #1A202C;
+    --color-text-secondary: #4A5568;
+    --color-text-muted: #A0AEC0;
+    --color-text-disabled: #CBD5E0;
+    --color-text-inverse: #FFFFFF;
+    --color-text-on-primary: #FFFFFF;
 
     /* Status Colors */
-    --color-success: #4CAF50;
-    --color-success-light: #66BB6A;
-    --color-warning: #FFA726;
+    --color-success: #38C172;
+    --color-success-light: #48D381;
+    --color-success-bg: rgba(56, 193, 114, 0.12);
+    --color-warning: #F6993F;
     --color-warning-light: #FFB74D;
-    --color-error: #EF5350;
-    --color-error-light: #F44336;
-    --color-info: #42A5F5;
+    --color-warning-bg: rgba(246, 153, 63, 0.12);
+    --color-error: #E53E3E;
+    --color-error-light: #FC8181;
+    --color-error-bg: rgba(229, 62, 62, 0.12);
+    --color-info: #4299E1;
+    --color-info-bg: rgba(66, 153, 225, 0.12);
 
     /* UI Elements */
-    --color-border: rgba(255, 255, 255, 0.12);
-    --color-border-hover: rgba(255, 255, 255, 0.24);
-    --color-hover: rgba(0, 188, 212, 0.08);
-    --color-active: rgba(0, 188, 212, 0.16);
-    --color-disabled: rgba(255, 255, 255, 0.06);
+    --color-border: #E2E8F0;
+    --color-border-hover: #CBD5E0;
+    --color-hover: rgba(46, 203, 240, 0.08);
+    --color-active: rgba(46, 203, 240, 0.16);
+    --color-disabled: rgba(0, 0, 0, 0.04);
 
     /* Shadows */
-    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
-    --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.7);
-    --shadow-glow: 0 0 20px rgba(0, 188, 212, 0.4);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.12);
+    --shadow-glow: 0 0 20px rgba(46, 203, 240, 0.25);
+    --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
 
-    /* === TYPOGRAPHY === */
+    /* Sidebar */
+    --sidebar-bg: #FFFFFF;
+    --sidebar-border: #E2E8F0;
+    --sidebar-text: #4A5568;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-active-bg: #2ECBF0;
+    --sidebar-hover-bg: #F0F4FA;
 
-    /* Font Family */
+    /* Cards */
+    --card-bg: #FFFFFF;
+    --card-border: #E2E8F0;
+    --card-radius: 16px;
+
+    /* ===  TYPOGRAPHY === */
     --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
     /* Font Sizes */
     --text-xs: 0.75rem;
-    /* 12px */
     --text-sm: 0.875rem;
-    /* 14px */
     --text-base: 1rem;
-    /* 16px */
     --text-lg: 1.125rem;
-    /* 18px */
     --text-xl: 1.25rem;
-    /* 20px */
     --text-2xl: 1.5rem;
-    /* 24px */
     --text-3xl: 1.875rem;
-    /* 30px */
     --text-4xl: 2.25rem;
-    /* 36px */
 
     /* Font Weights */
     --font-normal: 400;
@@ -79,42 +101,27 @@
     --leading-relaxed: 1.75;
 
     /* === SPACING === */
-
     --space-xs: 0.5rem;
-    /* 8px */
     --space-sm: 0.75rem;
-    /* 12px */
     --space-md: 1rem;
-    /* 16px */
     --space-lg: 1.5rem;
-    /* 24px */
     --space-xl: 2rem;
-    /* 32px */
     --space-2xl: 3rem;
-    /* 48px */
     --space-3xl: 4rem;
-    /* 64px */
 
     /* === BORDER RADIUS === */
-
     --radius-sm: 0.5rem;
-    /* 8px */
     --radius-md: 0.75rem;
-    /* 12px */
     --radius-lg: 1rem;
-    /* 16px */
     --radius-xl: 1.5rem;
-    /* 24px */
     --radius-full: 9999px;
 
     /* === TRANSITIONS === */
-
     --transition-fast: 150ms ease-in-out;
     --transition-base: 200ms ease-in-out;
     --transition-slow: 300ms ease-in-out;
 
     /* === Z-INDEX === */
-
     --z-dropdown: 1000;
     --z-sticky: 1020;
     --z-fixed: 1030;
@@ -124,18 +131,165 @@
     --z-tooltip: 1070;
 
     /* === LAYOUT === */
-
     --navbar-height: 4rem;
-    /* 64px */
     --sidebar-width: 16rem;
-    /* 256px */
     --content-max-width: 80rem;
-    /* 1280px */
 
-    /* === BREAKPOINTS (for JS usage) === */
-
+    /* === BREAKPOINTS === */
     --bp-mobile: 640px;
     --bp-tablet: 768px;
     --bp-desktop: 1024px;
     --bp-wide: 1280px;
+}
+
+/* ============================
+   DARK THEME
+   ============================ */
+[data-theme="dark"] {
+    /* Primary */
+    --color-primary: #38bdf8;
+    --color-primary-light: #7dd3fc;
+    --color-primary-dark: #0ea5e9;
+    --color-primary-rgb: 56, 189, 248;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #6366f1, #8b5cf6);
+    --gradient-hero: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+    --gradient-active: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.25));
+
+    /* Backgrounds */
+    --color-bg-primary: #0f172a;
+    --color-bg-secondary: #1e293b;
+    --color-bg-tertiary: #334155;
+    --color-bg-elevated: #1e293b;
+    --color-bg-sidebar: rgba(15, 23, 42, 0.85);
+    --color-bg-input: #1e293b;
+    --color-bg-chat: #0f172a;
+    --color-bg-msg-ai: #1e293b;
+    --color-bg-msg-user: linear-gradient(135deg, #6366f1, #8b5cf6);
+
+    /* Text */
+    --color-text-primary: #f1f5f9;
+    --color-text-secondary: #cbd5e1;
+    --color-text-muted: #64748b;
+    --color-text-disabled: #475569;
+    --color-text-inverse: #0f172a;
+    --color-text-on-primary: #FFFFFF;
+
+    /* Status */
+    --color-success: #4ade80;
+    --color-success-light: #86efac;
+    --color-success-bg: rgba(74, 222, 128, 0.15);
+    --color-warning: #fbbf24;
+    --color-warning-light: #fcd34d;
+    --color-warning-bg: rgba(251, 191, 36, 0.15);
+    --color-error: #f87171;
+    --color-error-light: #fca5a5;
+    --color-error-bg: rgba(248, 113, 113, 0.15);
+    --color-info: #60a5fa;
+    --color-info-bg: rgba(96, 165, 250, 0.15);
+
+    /* UI */
+    --color-border: rgba(255, 255, 255, 0.1);
+    --color-border-hover: rgba(255, 255, 255, 0.2);
+    --color-hover: rgba(56, 189, 248, 0.1);
+    --color-active: rgba(56, 189, 248, 0.2);
+    --color-disabled: rgba(255, 255, 255, 0.05);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.6);
+    --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.3);
+    --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+
+    /* Sidebar */
+    --sidebar-bg: rgba(15, 23, 42, 0.85);
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-text: #94a3b8;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-active-bg: rgba(99, 102, 241, 0.25);
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+
+    /* Cards */
+    --card-bg: #1e293b;
+    --card-border: rgba(255, 255, 255, 0.08);
+    --card-radius: 16px;
+}
+
+/* ============================
+   FACULTY LIGHT THEME (Figma White-Green)
+   ============================ */
+[data-theme="faculty-light"] {
+    /* Primary - Emerald Green */
+    --color-primary: #00BF8E;
+    --color-primary-light: #33CC9F;
+    --color-primary-dark: #00A67A;
+    --color-primary-rgb: 0, 191, 142;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #00BF8E, #00D4A0);
+    --gradient-hero: linear-gradient(135deg, #00BF8E 0%, #00D4A0 50%, #2DD4BF 100%);
+    --gradient-active: linear-gradient(135deg, #00BF8E, #2DD4BF);
+
+    /* Backgrounds */
+    --color-bg-primary: #F3F4F6;
+    --color-bg-secondary: #FFFFFF;
+    --color-bg-tertiary: #F9FAFB;
+    --color-bg-elevated: #FFFFFF;
+    --color-bg-sidebar: #1B2A4A;
+    --color-bg-input: #F9FAFB;
+    --color-bg-chat: #F3F4F6;
+    --color-bg-msg-ai: #FFFFFF;
+    --color-bg-msg-user: linear-gradient(135deg, #00BF8E, #00D4A0);
+
+    /* Text */
+    --color-text-primary: #111827;
+    --color-text-secondary: #4B5563;
+    --color-text-muted: #9CA3AF;
+    --color-text-disabled: #D1D5DB;
+    --color-text-inverse: #FFFFFF;
+    --color-text-on-primary: #FFFFFF;
+
+    /* Status */
+    --color-success: #10B981;
+    --color-success-light: #34D399;
+    --color-success-bg: rgba(16, 185, 129, 0.12);
+    --color-warning: #F59E0B;
+    --color-warning-light: #FBBF24;
+    --color-warning-bg: rgba(245, 158, 11, 0.12);
+    --color-error: #EF4444;
+    --color-error-light: #F87171;
+    --color-error-bg: rgba(239, 68, 68, 0.12);
+    --color-info: #3B82F6;
+    --color-info-bg: rgba(59, 130, 246, 0.12);
+
+    /* UI */
+    --color-border: #E5E7EB;
+    --color-border-hover: #D1D5DB;
+    --color-hover: rgba(0, 191, 142, 0.08);
+    --color-active: rgba(0, 191, 142, 0.16);
+    --color-disabled: rgba(0, 0, 0, 0.04);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.12);
+    --shadow-glow: 0 0 20px rgba(0, 191, 142, 0.25);
+    --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+
+    /* Sidebar - Dark Navy */
+    --sidebar-bg: #1B2A4A;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-text: #94A3B8;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-active-bg: #00BF8E;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+
+    /* Cards */
+    --card-bg: #FFFFFF;
+    --card-border: #E5E7EB;
+    --card-radius: 16px;
 }

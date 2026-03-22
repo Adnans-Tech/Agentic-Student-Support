@@ -1,4 +1,4 @@
-/* Student Profile - Theme-Aware Figma Design */
+/* Faculty Profile - Theme-Aware Design (mirrors Student Profile) */
 
 .profilePage {
     padding: 28px 32px;
@@ -134,6 +134,7 @@
     background: var(--color-error-bg);
     color: var(--color-error);
     border-color: transparent;
+    cursor: pointer;
 }
 
 /* === TWO COLUMN LAYOUT === */
@@ -210,7 +211,15 @@
     gap: 4px;
 }
 
-.fieldGroup label {
+.fieldGroupFull {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.fieldGroup label,
+.fieldGroupFull label {
     font-size: 12px;
     font-weight: 600;
     color: var(--color-text-muted);
@@ -231,11 +240,34 @@
     border-radius: 10px;
     font-size: 14px;
     color: var(--color-text-primary);
-    background: var(--color-bg-input);
+    background: var(--color-bg-input, var(--color-bg-secondary));
     transition: all 0.25s ease;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .formInput:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
+}
+
+.formTextarea {
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--color-text-primary);
+    background: var(--color-bg-input, var(--color-bg-secondary));
+    transition: all 0.25s ease;
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+}
+
+.formTextarea:focus {
     outline: none;
     border-color: var(--color-primary);
     box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
@@ -264,6 +296,11 @@
     box-shadow: 0 4px 16px rgba(46, 203, 240, 0.3);
 }
 
+.btnPrimary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .btnSecondary {
     flex: 1;
     padding: 10px;
@@ -274,60 +311,6 @@
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-}
-
-/* === CGPA === */
-.cgpaSection {
-    text-align: center;
-}
-
-.cgpaLabel {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: block;
-    margin-bottom: 12px;
-}
-
-.cgpaInputWrapper {
-    display: flex;
-    align-items: baseline;
-    justify-content: center;
-    gap: 4px;
-    margin-bottom: 10px;
-}
-
-.cgpaInput {
-    width: 100px;
-    padding: 10px;
-    font-size: 32px;
-    font-weight: 800;
-    text-align: center;
-    border: 2px solid var(--color-border);
-    border-radius: 14px;
-    color: var(--color-primary);
-    background: var(--color-bg-input);
-    transition: all 0.25s ease;
-}
-
-.cgpaInput:focus {
-    outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(46, 203, 240, 0.12);
-}
-
-.cgpaMax {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--color-text-muted);
-}
-
-.cgpaHint {
-    font-size: 12px;
-    color: var(--color-text-muted);
-    margin: 0;
 }
 
 /* === THEME TOGGLE === */
@@ -435,6 +418,247 @@
 
 
 
+/* === HINT TEXT === */
+.hintText {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+/* === CALENDAR === */
+.calendarSection {
+    margin-top: 24px;
+}
+
+.calendarHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.calendarNav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.calendarNavBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.calendarNavBtn:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.calendarMonth {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    min-width: 180px;
+    text-align: center;
+}
+
+.addEventBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: none;
+    background: var(--gradient-primary);
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.addEventBtn:hover {
+    box-shadow: 0 4px 16px rgba(46, 203, 240, 0.3);
+}
+
+/* === TIMETABLE SECTION === */
+.timetableSection {
+    margin-top: 24px;
+}
+
+.editHint {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-tertiary);
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid var(--color-primary);
+}
+
+.timetableTableWrapper {
+    overflow-x: auto;
+    background: var(--card-bg);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+}
+
+.timetableTable {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 900px;
+}
+
+.timetableTable th,
+.timetableTable td {
+    border: 1px solid var(--color-border);
+    padding: 10px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.timetableTable th {
+    background: var(--gradient-primary);
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.timeHeader {
+    width: 100px;
+    background: #0f172a !important;
+    /* Slightly darker for the corner */
+}
+
+.timeColHeader {
+    width: 110px;
+    font-size: 12px !important;
+}
+
+.dayCol {
+    font-weight: 700;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    font-size: 14px;
+}
+
+.breakCol {
+    font-weight: 700;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    width: 40px;
+    padding: 8px 4px;
+    vertical-align: middle;
+}
+
+.breakCol div {
+    line-height: 1.4;
+    text-align: center;
+}
+
+.periodCol {
+    height: 70px;
+    position: relative;
+    transition: background 0.2s;
+    background: var(--card-bg);
+}
+
+.editableCell {
+    cursor: pointer;
+}
+
+.editableCell:hover {
+    background: var(--color-bg-tertiary);
+}
+
+.cellContent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 4px;
+}
+
+.cellSubject {
+    font-weight: 700;
+    color: var(--color-text-primary);
+    font-size: 13px;
+}
+
+.cellClass {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    background: var(--color-bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.cellEmpty {
+    color: var(--color-text-muted);
+    opacity: 0.5;
+}
+
+.cellEditor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+    background: var(--color-bg-secondary);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 130px;
+    z-index: 10;
+    border: 1px solid var(--color-primary);
+}
+
+.cellInput {
+    padding: 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--card-bg);
+    color: var(--color-text-primary);
+}
+
+.cellActions {
+    display: flex;
+    gap: 4px;
+}
+
+.cellBtnSave,
+.cellBtnCancel {
+    flex: 1;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    color: white;
+}
+
+.cellBtnSave {
+    background: var(--color-success, #22c55e);
+}
+
+.cellBtnCancel {
+    background: var(--color-error, #ef4444);
+}
+
+
 /* === TOAST === */
 .toast {
     position: fixed;
@@ -444,17 +668,17 @@
     border-radius: 14px;
     font-size: 14px;
     font-weight: 500;
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.15));
     z-index: 1060;
 }
 
 .toast.success {
-    background: var(--color-success);
+    background: var(--color-success, #22c55e);
     color: white;
 }
 
 .toast.error {
-    background: var(--color-error);
+    background: var(--color-error, #ef4444);
     color: white;
 }
 
@@ -480,6 +704,18 @@
     }
 
     .detailsGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .calendarGrid {
+        font-size: 11px;
+    }
+
+    .calendarDay {
+        min-height: 70px;
+    }
+
+    .modalRow {
         grid-template-columns: 1fr;
     }
 }

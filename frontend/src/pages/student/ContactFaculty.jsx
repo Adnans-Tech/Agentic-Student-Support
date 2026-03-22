@@ -34,7 +34,7 @@ const ContactFaculty = () => {
         try {
             const response = await studentService.getDepartments();
             if (response.success) {
-                setDepartments(response.departments || []);
+                setDepartments((response.departments || []).filter(dept => dept && dept !== '-'));
             }
         } catch (error) {
             console.error('Failed to load departments:', error);

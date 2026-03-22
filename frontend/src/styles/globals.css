@@ -26,26 +26,27 @@ body {
     color: var(--color-text-primary);
     background-color: var(--color-bg-primary);
     overflow-x: hidden;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* === SCROLLBAR STYLING === */
 
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--color-bg-secondary);
+    background: var(--color-bg-primary);
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--color-bg-tertiary);
+    background: var(--color-border);
     border-radius: var(--radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-primary-dark);
+    background: var(--color-primary);
 }
 
 /* === TYPOGRAPHY === */
@@ -172,7 +173,7 @@ button:disabled {
     opacity: 0.5;
 }
 
-/* Focus styles for accessibility */
+/* Focus styles */
 input:focus,
 textarea:focus,
 select:focus,
@@ -251,15 +252,9 @@ button:focus {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
-
-    /* Disable Framer Motion animations */
-    .motion-reduce {
-        animation: none !important;
-        transition: none !important;
-    }
 }
 
-/* === RESPONSIVE BREAKPOINTS === */
+/* === RESPONSIVE === */
 
 @media (max-width: 768px) {
     html {
@@ -271,7 +266,7 @@ button:focus {
     }
 }
 
-/* === PRINT STYLES === */
+/* === PRINT === */
 
 @media print {
     body {

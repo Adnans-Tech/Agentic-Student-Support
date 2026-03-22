@@ -15,6 +15,7 @@ const OTPVerification = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const email = location.state?.email;
+    const role = location.state?.role || 'student';
 
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const [loading, setLoading] = useState(false);
@@ -91,8 +92,13 @@ const OTPVerification = () => {
             const response = await authService.verifyOTP(email, otpValue);
 
             if (response.success) {
-                // Success - redirect to dashboard
-                navigate('/student/dashboard');
+                // Redirect based on role
+                const userRole = response.user?.role || role;
+                if (userRole === 'faculty') {
+                    navigate('/faculty/dashboard');
+                } else {
+                    navigate('/student/dashboard');
+                }
             } else {
                 setError(formatBackendError(response));
                 setOtp(['', '', '', '', '', '']);
@@ -177,7 +183,7 @@ const OTPVerification = () => {
                                 onChange={(e) => handleChange(index, e.target.value)}
                                 onKeyDown={(e) => handleKeyDown(index, e)}
                                 onPaste={index === 0 ? handlePaste : undefined}
-                                className={`${styles.otpDigit} ${error ? styles.otpDigitError : ''}`}
+                                className={`${styles.otpInput} ${error ? styles.otpDigitError : ''}`}
                                 disabled={loading}
                                 variants={otpDigit}
                             />

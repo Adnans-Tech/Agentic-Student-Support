@@ -13,11 +13,12 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
     const [editMode, setEditMode] = useState(false);
     // For emails: editedSubject = subject, editedBody = body
     // For tickets: editedSubject = title, editedBody = description
+    // For resolve: editedBody = resolution_note
     const [editedSubject, setEditedSubject] = useState(
         preview?.subject || preview?.title || ''
     );
     const [editedBody, setEditedBody] = useState(
-        preview?.body || preview?.description || ''
+        preview?.body || preview?.description || preview?.resolution_note || ''
     );
 
     const handleConfirm = async () => {
@@ -25,6 +26,7 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
         // Pass edited content if modified
         const isEmail = action === 'email_preview';
         const isTicket = action === 'ticket_preview';
+        const isResolve = action === 'ticket_resolve_preview';
 
         if (isEmail && (editedSubject !== preview?.subject || editedBody !== preview?.body)) {
             await onConfirm({ subject: editedSubject, body: editedBody });
@@ -37,6 +39,13 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
                 title: editedSubject,
                 description: editedBody
             });
+        } else if (isResolve) {
+            // For ticket resolution, pass edited note if modified
+            if (editedBody !== preview?.resolution_note) {
+                await onConfirm({ resolution_note: editedBody });
+            } else {
+                await onConfirm();
+            }
         } else {
             await onConfirm();
         }
@@ -48,7 +57,7 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
         if (!editMode) {
             // Entering edit mode - initialize with current values
             setEditedSubject(preview?.subject || preview?.title || '');
-            setEditedBody(preview?.body || preview?.description || '');
+            setEditedBody(preview?.body || preview?.description || preview?.resolution_note || '');
         }
     };
 
@@ -263,6 +272,100 @@ const ConfirmationCard = ({ action, summary, details, onConfirm, onCancel, previ
                             whileTap={{ scale: 0.98 }}
                         >
                             {loading ? 'Creating...' : '✓ Raise Ticket'}
+                        </motion.button>
+
+                        <motion.button
+                            className={`${styles.button} ${styles.cancelButton}`}
+                            onClick={() => !loading && onCancel()}
+                            disabled={loading}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            ✕ Cancel
+                        </motion.button>
+                    </div>
+                </div>
+            </motion.div>
+        );
+    }
+
+    // Render ticket resolve preview with edit capability
+    if (action === 'ticket_resolve_preview' && preview) {
+        return (
+            <motion.div
+                className={styles.confirmationCard}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+            >
+                <div className={styles.iconContainer}>
+                    <span className={styles.icon}>📋</span>
+                </div>
+
+                <div className={styles.content}>
+                    <h4 className={styles.title}>Ticket Resolution Preview</h4>
+                    <p className={styles.summary}>{summary}</p>
+
+                    <div className={styles.emailPreview}>
+                        {/* Ticket ID */}
+                        <div className={styles.previewRow}>
+                            <span className={styles.previewLabel}>Ticket:</span>
+                            <span className={styles.previewValue}>{preview.ticket_id}</span>
+                        </div>
+
+                        {/* Resolution Note - editable */}
+                        <div className={styles.previewBody}>
+                            <span className={styles.previewLabel}>Resolution Note:</span>
+                            {editMode ? (
+                                <div className={styles.editBodyContainer}>
+                                    <textarea
+                                        className={styles.editTextarea}
+                                        value={editedBody}
+                                        onChange={(e) => setEditedBody(e.target.value)}
+                                        placeholder="Resolution note"
+                                        rows={8}
+                                    />
+                                    <div className={styles.charCount}>
+                                        {editedBody.length} characters
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className={styles.bodyPreview}>
+                                    {preview.resolution_note}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className={styles.buttonGroup}>
+                        <motion.button
+                            className={`${styles.button} ${styles.editButton}`}
+                            onClick={handleEdit}
+                            disabled={loading}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            {editMode ? '👁️ Preview' : '✎ Edit'}
+                        </motion.button>
+
+                        <motion.button
+                            className={`${styles.button} ${styles.regenerateButton}`}
+                            onClick={() => !loading && onConfirm({ regenerate: true })}
+                            disabled={loading}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            🔄 Regenerate
+                        </motion.button>
+
+                        <motion.button
+                            className={`${styles.button} ${styles.confirmButton}`}
+                            onClick={handleConfirm}
+                            disabled={loading || !editedBody}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            {loading ? 'Resolving...' : '✓ Resolve Ticket'}
                         </motion.button>
 
                         <motion.button
