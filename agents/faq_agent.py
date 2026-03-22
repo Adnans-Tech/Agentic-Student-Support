@@ -12,7 +12,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from config import GROQ_API_KEY
+from core.config import GROQ_API_KEY
 from typing import Optional, List, Dict
 import re
 

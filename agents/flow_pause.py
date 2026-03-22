@@ -29,6 +29,7 @@ class FlowPauseManager:
         self.paused_flows[session_id][flow_name] = {
             "state": state.copy(),
             "paused_at": time.time(),
+            "last_updated": time.time(),
             "expires_at": expires_at
         }
         
@@ -60,6 +61,7 @@ class FlowPauseManager:
         
         # Resume: return state and remove from paused
         state = flow_data["state"]
+        state["last_updated"] = flow_data.get("last_updated", flow_data.get("paused_at", 0))
         del self.paused_flows[session_id][flow_name]
         
         print(f"[FLOW_PAUSE] Resumed '{flow_name}' for session {session_id[:8]}")

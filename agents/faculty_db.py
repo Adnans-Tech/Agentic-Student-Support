@@ -18,7 +18,7 @@ from typing import List, Dict, Optional, Tuple
 # Import db_config for dual-backend support
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db_config import (
+from core.db_config import (
     get_db_connection,
     get_placeholder,
     is_postgres,
@@ -147,6 +147,19 @@ class FacultyDatabase:
                 status TEXT NOT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (faculty_id) REFERENCES faculty(faculty_id)
+            )
+        """)
+
+        # Faculty sent emails table (for tracking emails sent by faculty via chat assistant)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS faculty_sent_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_email TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -668,7 +681,7 @@ class FacultyDatabase:
         cursor = get_dict_cursor(conn)
         
         cursor.execute("""
-            SELECT faculty_id, name, email, designation, department, phone
+            SELECT faculty_id, name, email, designation, department, phone_number as phone
             FROM faculty
             ORDER BY name
         """)

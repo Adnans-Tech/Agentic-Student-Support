@@ -25,7 +25,7 @@ import os
 import mimetypes
 import requests
 sys.path.append('..')
-from config import SENDGRID_API_KEY, NOTIFICATION_EMAIL_FROM, GROQ_API_KEY
+from core.config import SENDGRID_API_KEY, NOTIFICATION_EMAIL_FROM, GROQ_API_KEY
 
 
 class EmailAgent:
@@ -131,38 +131,32 @@ Generate ONLY the subject line, nothing else."""
     
     def generate_email_body(self, purpose: str, recipient_name: str = "", tone: str = "semi-formal", 
                            length: str = "medium", image_count: int = 0, student_name: str = "", 
-                           regenerate: bool = False) -> str:
+                           regenerate: bool = False, sender_role: str = "student") -> str:
         """
         Generate a professional email body using LLM with strict rules.
-        
-        CRITICAL RULES:
-        1. NEVER change the purpose of the email
-        2. ALWAYS use first-person singular ("I", "my", "me") - NEVER "we", "our", "the college"
-        3. NEVER add bullet points unless explicitly requested
-        4. NEVER add explanations or extra details beyond the purpose
-        5. Match requested length exactly (short = 3-4 lines, NOT 100 words)
-        6. DO NOT expand on minimal requests
-        7. Sender is an INDIVIDUAL STUDENT, not an institution
-        8. Greeting must be brief (single "Dear ..." line only)
         
         Args:
             purpose: The main purpose/topic of the email
             recipient_name: Optional recipient name for personalization  
-            tone: Email tone - "formal", "semi-formal", "friendly", or "urgent"
+            tone: Email tone - "formal", "semi-formal", "friendly", "urgent", or "strict"
             length: Email length - "short" (~3-4 lines), "medium" (~5-7 lines), "detailed" (~10-12 lines)
             image_count: Number of images attached (0 if none)
-            student_name: Student's name for signature (uses default if empty)
+            student_name: Sender's name for signature
             regenerate: If True, vary the phrasing for regeneration
+            sender_role: "student" or "faculty" — controls voice and persona
             
         Returns:
             str: Generated professional email body with signature
         """
+        is_faculty = sender_role == "faculty"
+        default_sig = student_name if student_name else ("Faculty" if is_faculty else "Student")
+        default_greeting_target = recipient_name or ("Student" if is_faculty else "Sir/Madam")
+
         if not GROQ_AVAILABLE or self.llm_client is None:
-            # Simple fallback
-            body = f"Dear {recipient_name or 'Sir/Madam'},\n\nI am writing to you regarding: {purpose}"
+            body = f"Dear {default_greeting_target},\n\nI am writing to you regarding: {purpose}"
             if image_count > 0:
                 body += "\n\nPlease refer to the attached images for reference."
-            signature = f"\n\nBest regards,\n{student_name if student_name else 'Student'}"
+            signature = f"\n\nBest regards,\n{default_sig}"
             return body + signature
         
         try:
@@ -171,7 +165,8 @@ Generate ONLY the subject line, nothing else."""
                 "formal": "Use formal, respectful language. Be direct and professional.",
                 "semi-formal": "Use professional but approachable language. Be polite and clear.",
                 "friendly": "Use warm, conversational language while maintaining professionalism.",
-                "urgent": "Use direct, action-oriented language. Convey urgency while remaining professional."
+                "urgent": "Use direct, action-oriented language. Convey urgency while remaining professional.",
+                "strict": "Use firm, authoritative language. Be direct and unambiguous. The email should sound commanding but still professional — NOT rude, but clearly leaving no room for negotiation or delay."
             }
             
             # Length guidance - STRICT enforcement
@@ -186,12 +181,41 @@ Generate ONLY the subject line, nothing else."""
             if image_count > 0:
                 image_instruction = f"\n- Include ONE brief sentence referencing the {image_count} attached image(s)."
             
-            temperature = 0.4 if regenerate else 0.2  # Lower temp for strict purpose preservation
+            temperature = 0.4 if regenerate else 0.2
+
+            # Build voice rules based on sender role
+            if is_faculty:
+                voice_rules = (
+                    "2. FIRST-PERSON VOICE (MANDATORY):\n"
+                    "   - ALWAYS use: \"I am writing\", \"I need\", \"I would like\", \"I expect\"\n"
+                    "   - NEVER use: \"we\", \"our college\", \"the institution\"\n"
+                    "   - The sender is a FACULTY MEMBER addressing a student\n"
+                    "   - Maintain authority appropriate for a teacher/professor"
+                )
+                system_msg = (
+                    f"You are a strict email writer. You MUST preserve the user's exact purpose. "
+                    f"You MUST write as a FACULTY MEMBER using 'I'. "
+                    f"You MUST match the requested {length} length exactly and the '{tone}' tone exactly. "
+                    f"NEVER add creativity or expand beyond what's requested."
+                )
+            else:
+                voice_rules = (
+                    "2. FIRST-PERSON VOICE (MANDATORY):\n"
+                    "   - ALWAYS use: \"I am writing\", \"I need\", \"I would like\", \"my request\"\n"
+                    "   - NEVER use: \"we\", \"our college\", \"the institution\", \"our students\", \"the college\"\n"
+                    "   - The sender is an INDIVIDUAL STUDENT, NOT an institution"
+                )
+                system_msg = (
+                    f"You are a strict email writer. You MUST preserve the user's exact purpose. "
+                    f"You MUST write as an individual using 'I', never as an institution. "
+                    f"You MUST match the requested {length} length exactly. "
+                    f"NEVER add creativity or expand beyond what's requested."
+                )
             
             prompt = f"""Generate a professional email body for this EXACT purpose:
 
 Purpose: {purpose}
-Recipient: {recipient_name if recipient_name else "Sir/Madam"}
+Recipient: {default_greeting_target}
 Tone: {tone}
 Length: {length}
 
@@ -203,12 +227,8 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
 1. PURPOSE PRESERVATION:
    - Write ONLY about the stated purpose
    - DO NOT change topics, add related subjects, or expand beyond what's asked
-   - If purpose is "inform about company drive" → write ONLY about that drive, nothing else
 
-2. FIRST-PERSON VOICE (MANDATORY):
-   - ALWAYS use: "I am writing", "I need", "I would like", "my request"
-   - NEVER use: "we", "our college", "the institution", "our students", "the college"
-   - The sender is an INDIVIDUAL STUDENT, NOT an institution
+{voice_rules}
 
 3. NO CREATIVE EXPANSION:
    - DO NOT add bullet points unless purpose explicitly requests them
@@ -220,25 +240,19 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
    - Count sentences carefully. DO NOT exceed the limit.
 
 5. GREETING CONSTRAINT:
-   - Use ONLY one line: "Dear {recipient_name or 'Sir/Madam'},"
+   - Use ONLY one line: "Dear {default_greeting_target},"
    - DO NOT add "I hope this email finds you well" or similar pleasantries{image_instruction}
 
 6. PLAIN TEXT FORMAT:
    - NO HTML tags
    - Use standard punctuation and line breaks only
 
-VALIDATION CHECKS (Before finalizing):
-✓ Does this email change the user's intended purpose? (If YES → REGENERATE)
-✓ Does this use institutional voice ("we"/"our")? (If YES → REGENERATE)  
-✓ Is the sender portrayed as an individual? (If NO → REGENERATE)
-✓ Is the length within limits? (If NO → REGENERATE)
-
 Generate ONLY the email body (greeting + content), NO signature."""
-
+            
             response = self.llm_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": f"You are a strict email writer. You MUST preserve the user's exact purpose. You MUST write as an individual using 'I', never as an institution. You MUST match the requested {length} length exactly. NEVER add creativity or expand beyond what's requested."},
+                    {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=temperature,
@@ -248,17 +262,16 @@ Generate ONLY the email body (greeting + content), NO signature."""
             body = response.choices[0].message.content.strip()
             
             # Add signature
-            signature_name = student_name if student_name else "Student"
-            signature = f"\n\nBest regards,\n{signature_name}"
+            signature = f"\n\nBest regards,\n{default_sig}"
             
             return body + signature
             
         except Exception as e:
             # Fallback
-            body = f"Dear {recipient_name or 'Sir/Madam'},\n\nI am writing to you regarding: {purpose}"
+            body = f"Dear {default_greeting_target},\n\nI am writing to you regarding: {purpose}"
             if image_count > 0:
                 body += "\n\nPlease refer to the attached images for reference."
-            signature = f"\n\nBest regards,\n{student_name if student_name else 'Student'}"
+            signature = f"\n\nBest regards,\n{default_sig}"
             return body + signature
 
     def _prepare_image_attachment(self, image_url: str) -> dict:

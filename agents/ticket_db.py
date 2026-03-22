@@ -14,7 +14,7 @@ from typing import Optional, Dict, List, Tuple
 # Import db_config for dual-backend support
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db_config import (
+from core.db_config import (
     get_db_connection,
     get_placeholder,
     is_postgres,
@@ -83,6 +83,21 @@ class TicketDatabase:
                     FOREIGN KEY (student_email) REFERENCES students(email)
                 )
             ''')
+            
+            # Safely add columns for faculty ticket resolution
+            columns_to_add = [
+                ("resolved_by", "TEXT"),
+                ("resolved_at", "TIMESTAMP"),
+                ("resolution_note", "TEXT")
+            ]
+            
+            for col_name, col_type in columns_to_add:
+                try:
+                    cursor.execute(f"ALTER TABLE tickets ADD COLUMN {col_name} {col_type}")
+                except sqlite3.OperationalError:
+                    # Column already exists
+                    pass
+            
             
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticket_id ON tickets(ticket_id)')

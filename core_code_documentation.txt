@@ -1,0 +1,286 @@
+ACE SUPPORT SYSTEM - CRITICAL CODE SNIPPETS FOR DOCUMENTATION
+===================================================================
+This document contains the most important architectural components and algorithms 
+of the ACE Support System, curated for project documentation.
+
+===================================================================
+1. CORE ARCHITECTURE & API ROUTING (app.py)
+===================================================================
+The main entry point of the system handles API requests, authentication, and routes 
+chat messages to the Orchestrator Agent.
+
+```python
+# Initialize Flask Application and CORS
+app = Flask(__name__)
+PORT = 3845
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+
+# Secure Chat Endpoint with JWT Authentication
+@app.route('/api/chat', methods=['POST'])
+@require_auth
+def chat():
+    """Main route for handling chat interactions."""
+    try:
+        data = request.json
+        message = data.get('message', '').strip()
+        session_id = data.get('session_id')
+        user_email = getattr(request, 'user_email', None)
+
+        if not message or not session_id:
+            return jsonify({'error': 'Missing message or session_id'}), 400
+
+        # Route message to the AI Orchestrator
+        orchestrator = OrchestratorAgent()
+        response = orchestrator.process_message(
+            session_id=session_id,
+            user_message=message,
+            user_email=user_email
+        )
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return jsonify({'error': 'Internal server error processing message'}), 500
+```
+
+
+===================================================================
+2. THE INTENT ORCHESTRATOR (agents/orchestrator_agent.py)
+===================================================================
+The Orchestrator acts as the "brain," using an LLM to classify user intent and 
+route the conversation to specialized sub-agents.
+
+```python
+class OrchestratorAgent:
+    def __init__(self):
+        self.llm = ChatGroq(model_name="llama3-8b-8192", temperature=0)
+
+    def _determine_intent(self, message: str, context: str = "") -> IntentType:
+        """Classify user intent using LLMs to route to the correct sub-agent."""
+        prompt = f"""
+        Classify the user's message into EXACTLY ONE of these categories:
+        1. FAQ_QUERY: Asking general information about the college (admissions, campus, fees).
+        2. STUDENT_RECORD_QUERY: Asking about marks, attendance, or student data.
+        3. TICKET_CREATION: Reporting a problem, complaint, or requesting technical support.
+        4. OUTGOING_EMAIL: Requesting to send an email to a faculty member.
+        5. TICKET_STATUS: Asking for an update on an existing ticket.
+        
+        Recent Context: {context}
+        User Message: {message}
+        
+        Return ONLY the category name.
+        """
+        response = self.llm.invoke(prompt)
+        intent_str = response.content.strip()
+        return IntentType[intent_str] if intent_str in IntentType.__members__ else IntentType.FAQ_QUERY
+
+    def process_message(self, session_id: str, user_message: str, user_email: str):
+        """Main orchestrator logic to handle flow pause/resume and routing."""
+        # 1. Check for paused conversational flows (e.g., halfway through email drafting)
+        if has_paused_flow(session_id, "email_compose"):
+            return self._handle_email_flow(session_id, user_message, user_email)
+
+        # 2. Determine Intent
+        intent = self._determine_intent(user_message)
+
+        # 3. Route to corresponding specialized agent
+        if intent == IntentType.FAQ_QUERY:
+            return self.faq_agent.process(user_message, session_id)
+        elif intent == IntentType.OUTGOING_EMAIL:
+            return self._handle_email_flow(session_id, user_message, user_email)
+        elif intent == IntentType.TICKET_CREATION:
+            return self._handle_ticket_flow(session_id, user_message, user_email)
+```
+
+
+===================================================================
+3. RETRIEVAL-AUGMENTED GENERATION (RAG) ALGORITHM (agents/faq_agent.py)
+===================================================================
+The FAQ agent uses RAG to answer queries accurately by retrieving semantic chunks 
+from a knowledge base and analyzing them with an LLM.
+
+```python
+class FAQAgent:
+    def process(self, query: str, session_id: str) -> Dict[str, Any]:
+        """Execute the complete RAG pipeline for answering college queries."""
+        start_time = time.time()
+        
+        # Step 1: Query Processing & Synonym Expansion
+        processed_query, is_greeting, greeting_response = self._preprocess_query(query)
+        if is_greeting:
+            return AgentResponse.success(greeting_response)
+
+        # Step 2: Semantic Retrieval from Vector Database
+        # Uses cosine similarity or MMR to find most relevant context chunks
+        docs = self.vector_store.similarity_search(query=processed_query, k=4)
+        
+        if not docs:
+            return self._handle_no_context(query)
+
+        # Step 3: Context Aggregation
+        context = "\n---\n".join([doc.page_content for doc in docs])
+
+        # Step 4: LLM Generation (Augmentation)
+        prompt = f"""
+        You are an official AI Assistant for ACE Engineering College.
+        Answer the user's question accurately based ONLY on the provided Context.
+        If the answer is not contained in the Context, explicitly state that you don't know.
+        
+        Question: {query}
+        Context:
+        {context}
+        """
+        
+        response = self.llm.invoke(prompt)
+        answer = response.content.strip()
+
+        # Step 5: Confidence Scoring 
+        confidence = self._calculate_confidence(answer, context)
+        
+        return AgentResponse.create(
+            status="success",
+            message=answer,
+            confidence=confidence,
+            action_type="answer"
+        )
+```
+
+
+===================================================================
+4. AUTONOMOUS EMAIL COMPOSITION AGENT (agents/email_agent.py)
+===================================================================
+An advanced agent that drafts professional emails on behalf of the user, 
+extracting variables, applying formal tone, and handling image attachments.
+
+```python
+class EmailAgent:
+    def process_initial_intent(self, session_id: str, message: str, user_email: str):
+        """Extract missing slots (recipient, subject, purpose) for email drafting."""
+        
+        # Use LLM to extract structured JSON data from messy user input
+        extraction_prompt = f"""
+        Extract the following information from the user's email request:
+        1. target_faculty (e.g., 'HOD of CSE', 'John Doe')
+        2. purpose (What the email is about)
+        3. tone (e.g., 'formal', 'casual')
+        
+        User input: {message}
+        Return ONLY valid JSON format.
+        """
+        extracted_data = self._parse_llm_json(self.llm.invoke(extraction_prompt))
+
+        # Check for missing required slots and ask follow-up questions if needed
+        if not extracted_data.get('purpose'):
+            state = {"step": "awaiting_purpose", "data": extracted_data}
+            pause_flow(session_id, "email_compose", state)
+            return AgentResponse.create(status="needs_input", message="What is the main purpose of your email?")
+
+        return self._generate_draft(session_id, extracted_data, user_email)
+
+    def _generate_draft(self, session_id: str, data: dict, sender_email: str):
+        """Generate a highly professional email draft using the LLM."""
+        
+        draft_prompt = f"""
+        Write a professional email for a college environment.
+        From: {sender_email}
+        To: {data['target_faculty']}
+        Purpose: {data['purpose']}
+        
+        Ensure perfect grammar, a polite tone, and appropriate sign-offs.
+        """
+        draft_content = self.llm.invoke(draft_prompt).content
+        
+        # Pause the agent flow waiting for human confirmation
+        pause_flow(session_id, "email_compose", {
+            "step": "awaiting_confirmation",
+            "draft": draft_content,
+            "to": data['target_faculty']
+        })
+        
+        return AgentResponse.create(
+            status="needs_confirmation", 
+            message="Here is your draft. Should I send it?",
+            artifacts={"email_draft": draft_content}
+        )
+```
+
+
+===================================================================
+5. JWT AUTHENTICATION & SECURITY (utils/auth_utils.py)
+===================================================================
+Robust security mechanisms protecting the API endpoints and handling stateless 
+session management via JSON Web Tokens.
+
+```python
+def generate_jwt_token(user_id, email, role, is_admin=False):
+    """Generate a secure JWT token containing user identity and role."""
+    now = datetime.utcnow()
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'role': role,
+        'is_admin': is_admin,
+        'iat': now,
+        'exp': now + timedelta(hours=JWT_EXPIRY_HOURS)
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def require_auth(f):
+    """Decorator to protect API routes and validate JWT tokens."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid token'}), 401
+
+        token = auth_header.split(' ')[1]
+        try:
+            # Decode payload and attach to request context
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            request.user_id = payload['user_id']
+            request.user_email = payload['email']
+            request.user_role = payload['role']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
+```
+
+
+===================================================================
+6. SAFE DATABASE UTILITIES (agents/db_utils.py)
+===================================================================
+Custom wrappers ensuring thread-safe, concurrent SQLite database access 
+to prevent "database is locked" errors during heavy API loads.
+
+```python
+def execute_with_retry(db_path: str, operation: Callable, max_retries: int = 5):
+    """Execute a database operation with exponential backoff retry logic."""
+    delay = 0.2  # initial delay in seconds
+    
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            # Connect with Write-Ahead Logging (WAL) mode active
+            conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            
+            result = operation(conn)
+            conn.commit()
+            return result
+            
+        except sqlite3.OperationalError as e:
+            error_msg = str(e).lower()
+            if "locked" in error_msg or "busy" in error_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 1.5  # Exponential backoff
+                    continue
+            raise  # Rethrow if max retries reached or non-lock error
+        finally:
+            if conn:
+                conn.close()
+```

@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 
 # Import db_config for PostgreSQL dual-backend support
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db_config import (
+from core.db_config import (
     get_db_connection,
     get_placeholder,
     is_postgres,

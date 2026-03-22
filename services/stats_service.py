@@ -19,7 +19,7 @@ class StatsService:
 
     STUDENTS_DB = 'data/students.db'
     TICKETS_DB = 'data/tickets.db'
-    EMAIL_DB = 'data/email_requests.db'
+    EMAIL_DB = 'data/faculty_data.db'
 
     @staticmethod
     def _today_kolkata() -> str:

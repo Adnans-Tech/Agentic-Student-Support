@@ -1,17 +1,25 @@
 """
 Flask Web Application for Student Support System
 Provides API endpoints for FAQ, Email, and Ticket agents
-Supports dual SQLite/PostgreSQL backends via db_config
+SQLite backend with unified authentication system
 """
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
 from agents.faculty_db import FacultyDatabase, init_faculty_db
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 import sqlite3
 
-# Import dual-backend database configuration
-from db_config import (
+# Import database configuration
+from core.db_config import (
     get_db_connection,
     get_placeholder,
     is_postgres,
@@ -20,38 +28,50 @@ from db_config import (
 )
 
 # Import authentication utilities
-from auth_utils import (
+from utils.auth_utils import (
     init_auth_database,
     init_faculty_database,
-    require_auth, 
-    hash_password, 
+    require_auth,
+    hash_password,
     verify_password,
     generate_jwt_token,
     decode_jwt_token,
     generate_otp,
+    hash_otp,
     store_otp,
     verify_otp,
     check_rate_limit,
     check_otp_resend_cooldown,
     log_student_activity,
     get_recent_activity,
-    validate_roll_number
+    validate_roll_number,
+    validate_password_strength,
+    validate_department,
+    validate_section,
+    validate_faculty_email,
+    log_auth_event,
+    AUTH_DB_PATH,
+    VALID_DEPARTMENTS,
+    VALID_SECTIONS,
+    VALID_YEARS,
+    ADMIN_FACULTY_EMAIL,
+    FACULTY_EMAIL_DOMAIN,
 )
-from config import FRONTEND_URL
+from core.config import FRONTEND_URL
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # For session management
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 
 # Configure CORS for React frontend
-CORS(app, 
+CORS(app,
      resources={r"/api/*": {"origins": [FRONTEND_URL, "http://localhost:5173", "http://localhost:5174"]}},
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Initialize authentication database
-print("\n[INFO] Initializing Authentication System...")
+# Initialize authentication database (only creates tables if missing, non-destructive)
+print("\n[INFO] Checking Authentication System...")
 init_auth_database()
 init_faculty_database()
 
@@ -65,9 +85,15 @@ print("\n[INFO] Initializing Orchestrator Agent...")
 from agents.orchestrator_agent import get_orchestrator
 orchestrator_agent = get_orchestrator()
 
-# Reuse orchestrator's email agent for OTP sending (avoids creating a duplicate)
+# Initialize Faculty Orchestrator (separate from student orchestrator)
+print("\n[INFO] Initializing Faculty Orchestrator Agent...")
+from agents.faculty_orchestrator_agent import get_faculty_orchestrator
+faculty_orchestrator_agent = get_faculty_orchestrator()
+
+# Reuse orchestrator's agents (avoids creating duplicates)
 email_agent = orchestrator_agent.email_agent
 ticket_agent = orchestrator_agent.ticket_agent
+faq_agent = orchestrator_agent.faq_agent
 
 # Initialize faculty contact system
 print("\n[INFO] Initializing Faculty Contact System...")
@@ -81,170 +107,285 @@ print("\n[OK] All agents initialized successfully\n")
 
 
 # ============================================
-# Authentication Endpoints
+# Unified Authentication Endpoints
 # ============================================
 
 @app.route('/api/auth/register', methods=['POST'])
-def register_student():
-    """Register a new student account"""
+def register_user():
+    """
+    Unified registration endpoint for students and faculty.
+    Accepts a 'role' field to determine the registration type.
+    Auto-sends OTP after successful registration.
+    """
     try:
-        from datetime import datetime
-        print("Registration attempt started...") # DEBUG
         data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        roll_number = data.get('roll_number', '').strip().upper()
-        full_name = data.get('full_name', '').strip()
-        password = data.get('password', '')
-        department = data.get('department', '').strip()
-        year = data.get('year', '')
-        phone = data.get('phone', '').strip()
-        
-        # Validation
-        if not all([email, roll_number, full_name, password, department, year]):
-            print(f"Registration failed: Missing fields for {email}") # DEBUG
-            return jsonify({
-                'success': False,
-                'error': 'All fields are required'
-            }), 400
-        
-        # Check rate limit (max 3 registration attempts per hour per email)
+        role = (data.get('role', '') or '').strip().lower()
+
+        if role not in ('student', 'faculty'):
+            return jsonify({'success': False, 'error': 'Role must be "student" or "faculty"'}), 400
+
+        email = (data.get('email', '') or '').strip().lower()
+        password = data.get('password', '') or ''
+        confirm_password = data.get('confirm_password', '') or ''
+
+        # --- Common validations ---
+        if not email or '@' not in email or '.' not in email:
+            return jsonify({'success': False, 'error': 'Valid email is required'}), 400
+
+        # Password strength
+        pw_valid, pw_error = validate_password_strength(password)
+        if not pw_valid:
+            return jsonify({'success': False, 'error': pw_error}), 400
+
+        # Confirm password match
+        if password != confirm_password:
+            return jsonify({'success': False, 'error': 'Passwords do not match'}), 400
+
+        # Registration rate limit (3 per hour per email)
         allowed, remaining, reset_time = check_rate_limit(f"register_{email}", max_requests=3, window_minutes=60)
         if not allowed:
-            print(f"Registration failed: Rate limited for {email}") # DEBUG
             return jsonify({
                 'success': False,
-                'error': f'Too many registration attempts. Try again in {(reset_time - datetime.utcnow()).seconds // 60} minutes.',
+                'error': 'Too many registration attempts. Please try again later.',
                 'rate_limited': True
             }), 429
-        
-        # Validate email format (basic check)
-        if '@' not in email or '.' not in email:
-            print(f"Registration failed: Invalid email format {email}") # DEBUG
-            return jsonify({
-                'success': False,
-                'error': 'Invalid email format'
-            }), 400
-        
-        # Validate year
-        try:
-            year = int(year)
-            if year not in [1, 2, 3, 4]:
-                raise ValueError
-        except:
-            print(f"Registration failed: Invalid year {year}") # DEBUG
-            return jsonify({
-                'success': False,
-                'error': 'Year must be 1, 2, 3, or 4'
-            }), 400
-        
-        # Validate roll number format
-        is_valid, error_message = validate_roll_number(roll_number)
-        if not is_valid:
-            print(f"Registration failed: Invalid roll number {roll_number} - {error_message}") # DEBUG
-            return jsonify({
-                'success': False,
-                'error': error_message
-            }), 400
-        
-        # Check if email or roll number already exists
-        if is_postgres():
-            conn = get_db_connection('students')
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, email, roll_number FROM students WHERE email = %s OR roll_number = %s", 
-                          (email, roll_number))
-        else:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, email, roll_number FROM students WHERE email = ? OR roll_number = ?", 
-                          (email, roll_number))
-        
-        existing_account = cursor.fetchone()
-        
-        if existing_account:
-            existing_id, existing_email, existing_roll = existing_account
-            # Determine which field is duplicate
-            if existing_email == email and existing_roll == roll_number:
-                error_msg = 'This email and roll number are already registered. Please login instead.'
-            elif existing_email == email:
-                error_msg = 'This email is already registered. Please login instead.'
+
+        # Check if email already exists in users table
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, email_verified FROM users WHERE email = ?", (email,))
+        existing_user = cursor.fetchone()
+        is_reregistration = False
+        if existing_user:
+            existing_user_id = existing_user[0]
+            # Allow re-registration: update the password for the existing seeded account
+            # This lets users who were pre-seeded set their own password
+            password_hash = hash_password(password)
+            cursor.execute("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?",
+                           (password_hash, existing_user_id))
+            is_reregistration = True
+
+        if role == 'student':
+            # --- Student-specific validation ---
+            full_name = (data.get('full_name', '') or '').strip().upper()
+            roll_number = (data.get('roll_number', '') or '').strip().upper()
+            department = (data.get('department', '') or '').strip().upper()
+            year = data.get('year', '')
+            section = (data.get('section', '') or '').strip().upper()
+
+            if not full_name:
+                conn.close()
+                return jsonify({'success': False, 'error': 'Full name is required'}), 400
+
+            # Validate roll number
+            rn_valid, rn_error = validate_roll_number(roll_number)
+            if not rn_valid:
+                conn.close()
+                return jsonify({'success': False, 'error': rn_error}), 400
+
+            # Validate department
+            dep_valid, dep_error = validate_department(department)
+            if not dep_valid:
+                conn.close()
+                return jsonify({'success': False, 'error': dep_error}), 400
+
+            # Validate year
+            try:
+                year = int(year)
+                if year not in VALID_YEARS:
+                    raise ValueError
+            except (ValueError, TypeError):
+                conn.close()
+                return jsonify({'success': False, 'error': 'Year must be 1, 2, 3, or 4'}), 400
+
+            # Validate section
+            sec_valid, sec_error = validate_section(section)
+            if not sec_valid:
+                conn.close()
+                return jsonify({'success': False, 'error': sec_error}), 400
+
+            # Check duplicate roll number (skip for re-registration — the roll belongs to this user)
+            if not is_reregistration:
+                cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+                if cursor.fetchone():
+                    conn.close()
+                    return jsonify({'success': False, 'error': 'This roll number is already registered.'}), 400
+
+            if is_reregistration:
+                # Update existing student profile (password already updated above)
+                user_id = existing_user_id
+                cursor.execute("""
+                    UPDATE students SET full_name = ?, department = ?, year = ?, section = ?
+                    WHERE user_id = ?
+                """, (full_name, department, year, section, user_id))
             else:
-                error_msg = 'This roll number is already registered. Please use a different roll number.'
-            
-            print(f"Registration failed: {error_msg} (Email: {email}, Roll: {roll_number})") # DEBUG
+                # --- Insert new student ---
+                password_hash = hash_password(password)
+
+                cursor.execute("""
+                    INSERT INTO users (role, email, password_hash, email_verified, created_at)
+                    VALUES ('student', ?, ?, 0, ?)
+                """, (email, password_hash, datetime.utcnow()))
+                user_id = cursor.lastrowid
+
+                cursor.execute("""
+                    INSERT INTO students (user_id, email, roll_number, full_name, password_hash,
+                                          department, year, section, is_verified, created_at)
+                    VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
+                """, (user_id, email, roll_number, full_name, department, year, section, datetime.utcnow()))
+
+            conn.commit()
             conn.close()
-            return jsonify({
-                'success': False,
-                'error': error_msg
-            }), 400
-        
-        # Hash password
-        password_hash = hash_password(password)
-        
-        # Insert student
-        if is_postgres():
-            cursor.execute("""
-                INSERT INTO students (email, roll_number, full_name, password_hash, department, year, phone, is_verified)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
-            """, (email, roll_number, full_name, password_hash, department, year, phone))
-        else:
-            cursor.execute("""
-                INSERT INTO students (email, roll_number, full_name, password_hash, department, year, phone, is_verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-            """, (email, roll_number, full_name, password_hash, department, year, phone))
-        
-        conn.commit()
-        conn.close()
-        
+
+            log_auth_event(email, 'register', success=True, details=f'Student registered: {roll_number}', req=request)
+
+        elif role == 'faculty':
+            # --- Faculty-specific validation ---
+            full_name = (data.get('full_name', '') or '').strip().upper()
+            employee_id = (data.get('employee_id', '') or '').strip().upper()
+            department = (data.get('department', '') or '').strip().upper()
+            designation = (data.get('designation', '') or '').strip()
+            subject_incharge = (data.get('subject_incharge', '') or '').strip()
+            class_incharge = (data.get('class_incharge', '') or '').strip().upper()
+
+            if not full_name:
+                conn.close()
+                return jsonify({'success': False, 'error': 'Full name is required'}), 400
+
+            # Validate faculty email domain
+            fe_valid, fe_error = validate_faculty_email(email)
+            if not fe_valid:
+                conn.close()
+                return jsonify({'success': False, 'error': fe_error}), 400
+
+            # Validate department
+            dep_valid, dep_error = validate_department(department)
+            if not dep_valid:
+                conn.close()
+                return jsonify({'success': False, 'error': dep_error}), 400
+
+            # Check duplicate employee_id if provided (skip for re-registration)
+            if employee_id and not is_reregistration:
+                cursor.execute("SELECT id FROM faculty_profiles WHERE employee_id = ?", (employee_id,))
+                if cursor.fetchone():
+                    conn.close()
+                    return jsonify({'success': False, 'error': 'This employee ID is already registered.'}), 400
+
+            if is_reregistration:
+                # Update existing faculty profile (password already updated above)
+                user_id = existing_user_id
+                cursor.execute("""
+                    UPDATE faculty_profiles SET full_name = ?, department = ?,
+                           designation = ?, subject_incharge = ?, class_incharge = ?
+                    WHERE user_id = ?
+                """, (full_name, department, designation, subject_incharge, class_incharge, user_id))
+            else:
+                # --- Insert new faculty ---
+                password_hash = hash_password(password)
+
+                cursor.execute("""
+                    INSERT INTO users (role, email, password_hash, email_verified, created_at)
+                    VALUES ('faculty', ?, ?, 0, ?)
+                """, (email, password_hash, datetime.utcnow()))
+                user_id = cursor.lastrowid
+
+                cursor.execute("""
+                    INSERT INTO faculty_profiles (user_id, full_name, employee_id, department,
+                                                  designation, subject_incharge, class_incharge, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, full_name, employee_id or None, department,
+                      designation, subject_incharge, class_incharge, datetime.utcnow()))
+
+            conn.commit()
+            conn.close()
+
+            log_auth_event(email, 'register', success=True, details=f'Faculty registered: {full_name}', req=request)
+
+        # Auto-send OTP
+        try:
+            otp_code = generate_otp()
+            store_otp(email, otp_code)
+
+            subject = "🔐 ACE College – Email Verification OTP"
+            body = f"""Dear {'Student' if role == 'student' else 'Faculty Member'},
+
+Your One-Time Password (OTP) for ACE Engineering College account verification is:
+
+    {otp_code}
+
+⏱ This OTP is valid for 5 minutes. Please verify within 5 minutes.
+
+🔒 Security Note: If you didn't request this, please ignore this email. Do not share this code with anyone.
+
+Best regards,
+ACE Engineering College
+Student Support Team
+"""
+            email_agent.send_email(to_email=email, subject=subject, body=body)
+            log_auth_event(email, 'otp_send', success=True, details='OTP sent after registration', req=request)
+        except Exception as otp_err:
+            print(f"[WARN] OTP send failed after registration: {otp_err}")
+            log_auth_event(email, 'otp_send', success=False, details=str(otp_err), req=request)
+
         return jsonify({
             'success': True,
-            'message': 'Registration successful. Please verify your email with OTP.',
-            'email': email
+            'message': 'Registration successful. Please verify your email with the OTP sent.',
+            'email': email,
+            'role': role
         })
-        
+
     except Exception as e:
-        print(f"Registration Error: {str(e)}") # DEBUG
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"Registration Error: {str(e)}")
+        log_auth_event(data.get('email', ''), 'register', success=False, details=str(e), req=request)
+        return jsonify({'success': False, 'error': 'Registration failed. Please try again.'}), 500
 
 
 @app.route('/api/auth/send-otp', methods=['POST'])
-def send_otp():
-    """Send OTP to student email with rate limiting"""
+def send_otp_endpoint():
+    """
+    Send OTP to user email with rate limiting and anti-enumeration.
+    Works for both student and faculty accounts.
+    """
     try:
         data = request.get_json()
-        email = data.get('email', '').strip().lower()
+        email = (data.get('email', '') or '').strip().lower()
         resend = data.get('resend', False)
-        
+
         if not email:
             return jsonify({'success': False, 'error': 'Email is required'}), 400
-        
-        # Check if student exists
-        if is_postgres():
-            conn = get_db_connection('students')
-            cursor = conn.cursor()
-            cursor.execute("SELECT email, is_verified FROM students WHERE email = %s", (email,))
-        else:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT email, is_verified FROM students WHERE email = ?", (email,))
-        student = cursor.fetchone()
+
+        # Anti-enumeration: always return the same response
+        generic_response = {
+            'success': True,
+            'message': 'If an account exists with this email, an OTP has been sent.'
+        }
+
+        # Check if user exists
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, email_verified FROM users WHERE email = ?", (email,))
+        user = cursor.fetchone()
         conn.close()
-        
-        if not student:
-            return jsonify({'success': False, 'error': 'Email not registered'}), 400
-        
-        if student[1]:  # is_verified
-            return jsonify({'success': False, 'error': 'Email already verified'}), 400
-        
-        # Check OTP rate limit (max 5 OTPs per email per 15 minutes)
+
+        if not user:
+            # Don't reveal that the account doesn't exist
+            log_auth_event(email, 'otp_send', success=False, details='Account not found (anti-enum)', req=request)
+            return jsonify(generic_response)
+
+        if user[1]:  # already verified
+            log_auth_event(email, 'otp_send', success=False, details='Already verified', req=request)
+            return jsonify({'success': False, 'error': 'Email is already verified. Please login.'}), 400
+
+        # Rate limit: max 5 OTP requests per 15 minutes
         allowed, remaining, reset_time = check_rate_limit(f"otp_{email}", max_requests=5, window_minutes=15)
         if not allowed:
             return jsonify({
                 'success': False,
-                'error': f'Too many OTP requests. Try again in {(reset_time - datetime.utcnow()).seconds // 60} minutes.',
+                'error': 'Too many OTP requests. Please try again later.',
                 'rate_limited': True
             }), 429
-        
-        # Check resend cooldown (60 seconds)
+
+        # Resend cooldown: 60 seconds
         if resend:
             can_resend, wait_seconds = check_otp_resend_cooldown(email, cooldown_seconds=60)
             if not can_resend:
@@ -254,768 +395,492 @@ def send_otp():
                     'wait_seconds': wait_seconds,
                     'cooldown': True
                 }), 429
-        
-        # Generate and store OTP
+
+        # Generate, store, and send OTP
         otp_code = generate_otp()
         store_otp(email, otp_code)
-        
-        # Send OTP via Email Agent
-        subject = "🔐 Your OTP for ACE College Registration"
-        body = f"""
-Dear Student,
+
+        subject = "🔐 ACE College – Email Verification OTP"
+        body = f"""Dear User,
 
 Your One-Time Password (OTP) for ACE Engineering College account verification is:
 
-**{otp_code}**
+    {otp_code}
 
-This OTP will expire in 10 minutes. Please do not share this code with anyone.
+⏱ This OTP is valid for 5 minutes. Please verify within 5 minutes.
 
-If you did not request this OTP, please ignore this email.
+🔒 Security Note: If you didn't request this, please ignore this email. Do not share this code with anyone.
 
 Best regards,
 ACE Engineering College
 Student Support Team
 """
-        
+
         try:
-            email_result = email_agent.send_email(
-                to_email=email,
-                subject=subject,
-                body=body
-            )
-            
+            email_result = email_agent.send_email(to_email=email, subject=subject, body=body)
             if email_result.get('success'):
+                log_auth_event(email, 'otp_send', success=True, req=request)
                 return jsonify({
                     'success': True,
-                    'message': 'OTP sent successfully to your email',
-                    'otp_remaining': remaining
+                    'message': 'OTP sent successfully to your email.'
                 })
             else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to send OTP email. Please try again.'
-                }), 500
-                
-        except Exception as email_error:
-            print(f"Email sending failed: {email_error}")
-            return jsonify({
-                'success': False,
-                'error': 'Email service temporarily unavailable. Please try again later.'
-            }), 500
-        
+                log_auth_event(email, 'otp_send', success=False, details='Email send failed', req=request)
+                return jsonify({'success': False, 'error': 'Failed to send OTP. Please try again.'}), 500
+        except Exception as email_err:
+            print(f"OTP email send failed: {email_err}")
+            log_auth_event(email, 'otp_send', success=False, details=str(email_err), req=request)
+            return jsonify({'success': False, 'error': 'Email service temporarily unavailable.'}), 500
+
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/auth/verify-otp', methods=['POST'])
 def verify_otp_endpoint():
-    """Verify OTP and activate student account"""
+    """
+    Verify OTP and activate user account.
+    On success, marks email_verified=1 and returns JWT token.
+    """
     try:
         data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        otp_code = data.get('otp', '').strip()
-        
+        email = (data.get('email', '') or '').strip().lower()
+        otp_code = (data.get('otp', '') or '').strip()
+
         if not email or not otp_code:
             return jsonify({'success': False, 'error': 'Email and OTP are required'}), 400
-        
-        # Verify OTP
-        is_valid = verify_otp(email, otp_code)
-        
+
+        # Verify OTP (handles attempt tracking, expiry, hash comparison)
+        is_valid, message = verify_otp(email, otp_code)
+
         if not is_valid:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid or expired OTP'
-            }), 400
-        
-        # Mark student as verified
-        if is_postgres():
-            conn = get_db_connection('students')
-            cursor = conn.cursor()
-            cursor.execute("UPDATE students SET is_verified = 1 WHERE email = %s", (email,))
-            cursor.execute("SELECT id, email, roll_number, full_name, department, year FROM students WHERE email = %s", (email,))
-        else:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute("UPDATE students SET is_verified = 1 WHERE email = ?", (email,))
-            cursor.execute("SELECT id, email, roll_number, full_name, department, year FROM students WHERE email = ?", (email,))
-        student = cursor.fetchone()
-        
+            log_auth_event(email, 'otp_verify_fail', success=False, details=message, req=request)
+            return jsonify({'success': False, 'error': message}), 400
+
+        # Mark email as verified in users table
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET email_verified = 1 WHERE email = ?", (email,))
+
+        # Get user info
+        cursor.execute("SELECT id, role, email FROM users WHERE email = ?", (email,))
+        user = cursor.fetchone()
+
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+
+        user_id, role, user_email = user
+
+        # Build user response based on role
+        user_response = {'id': user_id, 'email': user_email, 'role': role}
+
+        if role == 'student':
+            # Also mark students table
+            cursor.execute("UPDATE students SET is_verified = 1 WHERE user_id = ?", (user_id,))
+            cursor.execute("""
+                SELECT roll_number, full_name, department, year, section
+                FROM students WHERE user_id = ?
+            """, (user_id,))
+            student = cursor.fetchone()
+            if student:
+                user_response.update({
+                    'roll_number': student[0],
+                    'full_name': student[1],
+                    'department': student[2],
+                    'year': student[3],
+                    'section': student[4],
+                })
+        elif role == 'faculty':
+            cursor.execute("""
+                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
+                FROM faculty_profiles WHERE user_id = ?
+            """, (user_id,))
+            faculty = cursor.fetchone()
+            if faculty:
+                user_response.update({
+                    'name': faculty[0],
+                    'full_name': faculty[0],
+                    'employee_id': faculty[1] or '',
+                    'department': faculty[2],
+                    'designation': faculty[3] or '',
+                    'subject_incharge': faculty[4] or '',
+                    'class_incharge': faculty[5] or '',
+                })
+
         conn.commit()
         conn.close()
-        
-        if not student:
-            return jsonify({'success': False, 'error': 'Student not found'}), 404
-        
+
         # Generate JWT token
-        token = generate_jwt_token(
-            user_id=student[0],
-            email=student[1],
-            role='student'
-        )
-        
+        token = generate_jwt_token(user_id=user_id, email=user_email, role=role)
+
         # Log activity
-        log_student_activity(email, 'registration', 'Account verified successfully')
-        
+        log_auth_event(email, 'otp_verify_success', success=True, req=request)
+        if role == 'student':
+            log_student_activity(email, 'registration', 'Account verified successfully')
+
         return jsonify({
             'success': True,
             'message': 'Email verified successfully',
             'token': token,
-            'user': {
-                'id': student[0],
-                'email': student[1],
-                'roll_number': student[2],
-                'full_name': student[3],
-                'department': student[4],
-                'year': student[5],
-                'role': 'student'
-            }
+            'user': user_response
         })
-        
+
     except Exception as e:
+        print(f"OTP Verify Error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/auth/login/student', methods=['POST'])
-def login_student():
-    """Student login endpoint - supports Roll Number OR Email"""
-    try:
-        from datetime import datetime
-        from config import ENABLE_OTP
-        
-        data = request.get_json()
-        # Accept 'identifier' field (Roll Number OR Email)
-        # For backward compatibility, also accept 'email' field
-        identifier = data.get('identifier') or data.get('email', '')
-        identifier = identifier.strip()
-        password = data.get('password', '')
-        
-        print(f"Login attempt with identifier: {identifier}") # DEBUG
-        
-        if not identifier or not password:
-            return jsonify({'success': False, 'error': 'Identifier and password are required'}), 400
-        
-        # Determine if identifier is email or roll number
-        if '@' in identifier:
-            # It's an email
-            query_field = 'email'
-            identifier = identifier.lower()
-        else:
-            # It's a roll number
-            query_field = 'roll_number'
-            identifier = identifier.upper()
-        
-        print(f"Querying by {query_field}: {identifier}") # DEBUG
-        
-        # Get student from database
-        if is_postgres():
-            conn = get_db_connection('students')
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT id, email, roll_number, full_name, department, year, password_hash, is_verified
-                FROM students WHERE {query_field} = %s
-            """, (identifier,))
-        else:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT id, email, roll_number, full_name, department, year, password_hash, is_verified
-                FROM students WHERE {query_field} = ?
-            """, (identifier,))
-        student = cursor.fetchone()
-        
-        if not student:
-            print(f"Login failed: Student not found for {query_field} {identifier}") # DEBUG
-            conn.close()
-            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-        
-        print(f"Student found: {student[3]}, Verified: {student[7]}") # DEBUG
-
-        # Check if verified (only if OTP is enabled)
-        if ENABLE_OTP and not student[7]:  # is_verified
-            conn.close()
-            return jsonify({
-                'success': False,
-                'error': 'Account not verified. Please verify your email with OTP.',
-                'requires_verification': True
-            }), 403
-        
-        # Verify password
-        password_hash = student[6]
-        if not verify_password(password_hash, password):
-            print(f"Login failed: Password mismatch for {identifier}") # DEBUG
-            conn.close()
-            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-        
-        # Update last login
-        if is_postgres():
-            cursor.execute("UPDATE students SET last_login = %s WHERE id = %s", 
-                          (datetime.utcnow(), student[0]))
-        else:
-            cursor.execute("UPDATE students SET last_login = ? WHERE id = ?", 
-                          (datetime.utcnow(), student[0]))
-        conn.commit()
-        conn.close()
-        
-        # Generate JWT token
-        token = generate_jwt_token(
-            user_id=student[0],
-            email=student[1],
-            role='student'
-        )
-        
-        # Log activity
-        log_student_activity(student[1], 'login', 'Logged in successfully')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Login successful',
-            'token': token,
-            'user': {
-                'id': student[0],
-                'email': student[1],
-                'roll_number': student[2],
-                'full_name': student[3],
-                'department': student[4],
-                'year': student[5],
-                'role': 'student'
-            }
-        })
-        
-    except Exception as e:
-        print(f"Login Exception: {str(e)}") # DEBUG
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/auth/login/faculty', methods=['POST'])
-def login_faculty():
-    """Faculty login endpoint (using existing faculty_data.db)"""
+@app.route('/api/auth/login', methods=['POST'])
+def login_user():
+    """
+    Unified login endpoint for students and faculty.
+    Students login with email + password only.
+    Faculty login with email + password.
+    """
     try:
         data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        password = data.get('password', '')
-        
+        email = (data.get('email', '') or data.get('identifier', '') or '').strip().lower()
+        password = data.get('password', '') or ''
+
         if not email or not password:
             return jsonify({'success': False, 'error': 'Email and password are required'}), 400
-        
-        # Get faculty from database
-        conn = sqlite3.connect('faculty_data.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT faculty_id, name, email, department, designation, phone_number
-            FROM faculty WHERE email = ?
-        """, (email,))
-        faculty = cursor.fetchone()
-        conn.close()
-        
-        if not faculty:
-            return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-        
-        # For now, we'll use a simple password check
-        # In production, add password_hash column to faculty table
-        # Temporary: Accept any faculty with password "faculty123"
-        if password != "faculty123":
-            return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-        
-        # Generate JWT token
-        token = generate_jwt_token(
-            user_id=faculty['faculty_id'],
-            email=faculty['email'],
-            role='faculty'
-        )
-        
-        return jsonify({
-            'success': True,
-            'message': 'Login successful',
-            'token': token,
-            'user': {
-                'id': faculty['faculty_id'],
-                'email': faculty['email'],
-                'name': faculty['name'],
-                'department': faculty['department'],
-                'designation': faculty['designation'] if faculty['designation'] else '',
-                'contact': faculty['phone_number'] if faculty['phone_number'] else '',
-                'role': 'faculty'
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
-
-# ============================================
-# Faculty Registration Endpoints
-# ============================================
-
-@app.route('/api/auth/faculty/register', methods=['POST'])
-def register_faculty():
-    """Register a new faculty account"""
-    try:
-        from datetime import datetime
-        
-        data = request.get_json()
-        official_email = data.get('official_email', '').strip().lower()
-        full_name = data.get('full_name', '').strip()
-        employee_id = data.get('employee_id', '').strip().upper()
-        department = data.get('department', '').strip()
-        designation = data.get('designation', '').strip()
-        password = data.get('password', '')
-        
-        # Validation
-        if not all([official_email, full_name, employee_id, department, password]):
-            return jsonify({
-                'success': False,
-                'error': 'All fields except designation are required'
-            }), 400
-        
-        # Check rate limit (max 3 registration attempts per hour per email)
-        allowed, remaining, reset_time = check_rate_limit(f"faculty_register_{official_email}", max_requests=3, window_minutes=60)
+        # Login rate limit (20 attempts per 15 minutes per email - relaxed for easier testing)
+        allowed, remaining, reset_time = check_rate_limit(f"login_{email}", max_requests=20, window_minutes=15)
         if not allowed:
+            log_auth_event(email, 'login_fail', success=False, details='Rate limited', req=request)
             return jsonify({
                 'success': False,
-                'error': f'Too many registration attempts. Try again in {(reset_time - datetime.utcnow()).seconds // 60} minutes.',
+                'error': 'Too many login attempts. Please try again later.',
                 'rate_limited': True
             }), 429
-        
-        # Validate email format
-        if '@' not in official_email or '.' not in official_email:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid email format'
-            }), 400
-        
-        # Check if email or employee_id already exists
-        conn = sqlite3.connect('data/faculty.db')
+
+        # Look up user by email
+        conn = sqlite3.connect(AUTH_DB_PATH)
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT official_email FROM faculty WHERE official_email = ? OR employee_id = ?", 
-                      (official_email, employee_id))
-        existing = cursor.fetchone()
-        
-        if existing:
-            conn.close()
-            return jsonify({
-                'success': False,
-                'error': 'Email or employee ID already registered'
-            }), 400
-        
-        # Hash password
-        password_hash = hash_password(password)
-        
-        # Insert faculty
         cursor.execute("""
-            INSERT INTO faculty (official_email, full_name, employee_id, department, designation, password_hash, is_verified)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
-        """, (official_email, full_name, employee_id, department, designation, password_hash))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Registration successful. Please verify your email with OTP.',
-            'email': official_email
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/auth/faculty/send-otp', methods=['POST'])
-def send_faculty_otp():
-    """Send OTP to faculty email with rate limiting"""
-    try:
-        from datetime import datetime
-        
-        data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        resend = data.get('resend', False)
-        
-        if not email:
-            return jsonify({'success': False, 'error': 'Email is required'}), 400
-        
-        # Check if faculty exists
-        conn = sqlite3.connect('data/faculty.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT official_email, is_verified FROM faculty WHERE official_email = ?", (email,))
-        faculty = cursor.fetchone()
-        conn.close()
-        
-        if not faculty:
-            return jsonify({'success': False, 'error': 'Email not registered'}), 400
-        
-        if faculty[1]:  # is_verified
-            return jsonify({'success': False, 'error': 'Email already verified'}), 400
-        
-        # Check OTP rate limit (max 5 OTPs per email per 15 minutes)
-        allowed, remaining, reset_time = check_rate_limit(f"faculty_otp_{email}", max_requests=5, window_minutes=15)
-        if not allowed:
-            return jsonify({
-                'success': False,
-                'error': f'Too many OTP requests. Try again in {(reset_time - datetime.utcnow()).seconds // 60} minutes.',
-                'rate_limited': True
-            }), 429
-        
-        # Check resend cooldown (60 seconds)
-        if resend:
-            can_resend, wait_seconds = check_otp_resend_cooldown(email, cooldown_seconds=60)
-            if not can_resend:
-                return jsonify({
-                    'success': False,
-                    'error': f'Please wait {wait_seconds} seconds before resending OTP',
-                    'wait_seconds': wait_seconds,
-                    'cooldown': True
-                }), 429
-        
-        # Generate and store OTP (for faculty)
-        otp_code = generate_otp()
-        store_otp(email, otp_code, user_type='faculty')
-        
-        # Send OTP via Email Agent
-        subject = "🔐 Your OTP for ACE Faculty Registration"
-        body = f"""
-Dear Faculty Member,
-
-Your One-Time Password (OTP) for ACE Engineering College faculty account verification is:
-
-**{otp_code}**
-
-This OTP will expire in 10 minutes. Please do not share this code with anyone.
-
-If you did not request this OTP, please ignore this email.
-
-Best regards,
-ACE Engineering College
-Administration Team
-"""
-        
-        try:
-            email_result = email_agent.send_email(
-                to_email=email,
-                subject=subject,
-                body=body
-            )
-            
-            if email_result.get('success'):
-                return jsonify({
-                    'success': True,
-                    'message': 'OTP sent successfully to your email',
-                    'otp_remaining': remaining
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to send OTP email. Please try again.'
-                }), 500
-                
-        except Exception as email_error:
-            print(f"Email sending failed: {email_error}")
-            return jsonify({
-                'success': False,
-                'error': 'Email service temporarily unavailable. Please try again later.'
-            }), 500
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/auth/faculty/verify-otp', methods=['POST'])
-def verify_faculty_otp():
-    """Verify OTP and activate faculty account"""
-    try:
-        data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        otp_code = data.get('otp', '').strip()
-        
-        if not email or not otp_code:
-            return jsonify({'success': False, 'error': 'Email and OTP are required'}), 400
-        
-        # Verify OTP (for faculty)
-        is_valid = verify_otp(email, otp_code, user_type='faculty')
-        
-        if not is_valid:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid or expired OTP'
-            }), 400
-        
-        # Mark faculty as verified
-        conn = sqlite3.connect('data/faculty.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("UPDATE faculty SET is_verified = 1 WHERE official_email = ?", (email,))
-        cursor.execute("""
-            SELECT id, official_email, full_name, employee_id, department, designation
-            FROM faculty WHERE official_email = ?
+            SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, 0), COALESCE(is_active, 1)
+            FROM users
+            WHERE email = ?
         """, (email,))
-        faculty = cursor.fetchone()
-        
-        conn.commit()
-        conn.close()
-        
-        if not faculty:
-            return jsonify({'success': False, 'error': 'Faculty not found'}), 404
-        
-        # Generate JWT token
-        token = generate_jwt_token(
-            user_id=faculty[0],
-            email=faculty[1],
-            role='faculty'
-        )
-        
-        return jsonify({
-            'success': True,
-            'message': 'Email verified successfully',
-            'token': token,
-            'user': {
-                'id': faculty[0],
-                'email': faculty[1],
-                'name': faculty[2],
-                'employee_id': faculty[3],
-                'department': faculty[4],
-                'designation': faculty[5],
-                'role': 'faculty'
-            }
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        user = cursor.fetchone()
 
+        if not user:
+            conn.close()
+            log_auth_event(email, 'login_fail', success=False, details='User not found', req=request)
+            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
-@app.route('/api/auth/faculty/login', methods=['POST'])
-def login_faculty_new():
-    """Faculty login endpoint with proper authentication"""
-    try:
-        from datetime import datetime
-        
-        data = request.get_json()
-        email = data.get('email', '').strip().lower()
-        password = data.get('password', '')
-        
-        if not email or not password:
-            return jsonify({'success': False, 'error': 'Email and password are required'}), 400
-        
-        # Get faculty from new faculty database
-        conn = sqlite3.connect('data/faculty.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, official_email, full_name, employee_id, department, designation, password_hash, is_verified
-            FROM faculty WHERE official_email = ?
-        """, (email,))
-        faculty = cursor.fetchone()
-        
-        # If not found in new DB, check old faculty_data.db for backward compatibility
-        if not faculty:
+        user_id, role, user_email, password_hash, email_verified, is_admin_flag, is_active_flag = user
+
+        # Check account active
+        if not is_active_flag:
             conn.close()
-            
-            try:
-                conn_old = sqlite3.connect('faculty_data.db')
-                conn_old.row_factory = sqlite3.Row
-                cursor_old = conn_old.cursor()
-                cursor_old.execute("""
-                    SELECT faculty_id, name, email, department, designation, phone_number
-                    FROM faculty WHERE email = ?
-                """, (email,))
-                old_faculty = cursor_old.fetchone()
-                conn_old.close()
-                
-                if not old_faculty:
-                    return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-                
-                # Old faculty - use temporary password
-                if password != "faculty123":
-                    return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-                
-                # Generate JWT token for old faculty
-                token = generate_jwt_token(
-                    user_id=str(old_faculty['faculty_id']),  # Ensure it's a string
-                    email=old_faculty['email'],
-                    role='faculty'
-                )
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'Login successful',
-                    'token': token,
-                    'user': {
-                        'id': old_faculty['faculty_id'],
-                        'email': old_faculty['email'],
-                        'name': old_faculty['name'],
-                        'department': old_faculty['department'],
-                        'designation': old_faculty['designation'] if old_faculty['designation'] else '',
-                        'contact': old_faculty['phone_number'] if old_faculty['phone_number'] else '',
-                        'role': 'faculty'
-                    }
-                })
-            except sqlite3.Error as e:
-                print(f"Database error in old faculty DB: {e}")
-                return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-        
-        # Faculty found in new DB - check verification
-        if not faculty[7]:  # is_verified
+            log_auth_event(email, 'login_fail', success=False, details='Account deactivated', req=request)
+            return jsonify({'success': False, 'error': 'Your account has been deactivated. Please contact admin.'}), 403
+
+        # Check email verification
+        if not email_verified:
             conn.close()
+            log_auth_event(email, 'login_fail', success=False, details='Email not verified', req=request)
             return jsonify({
                 'success': False,
-                'error': 'Please verify your email with OTP first',
-                'requires_verification': True
+                'error': 'Please verify your email first. Check your inbox for the OTP.',
+                'requires_verification': True,
+                'email': email
             }), 403
-        
+
+        # Enforce that user has registered and set a password
+        if not password_hash:
+            conn.close()
+            log_auth_event(email, 'login_fail', success=False, details='Password not registered', req=request)
+            return jsonify({'success': False, 'error': 'Account not registered. Please register first to set your password.'}), 403
+
         # Verify password
-        password_hash = faculty[6]
         if not verify_password(password_hash, password):
             conn.close()
-            return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-        
-        # Update last login
-        cursor.execute("UPDATE faculty SET last_login = ? WHERE official_email = ?", 
-                      (datetime.utcnow(), email))
+            log_auth_event(email, 'login_fail', success=False, details='Wrong password', req=request)
+            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+
+        # Build user response
+        user_response = {'id': user_id, 'email': user_email, 'role': role}
+
+        if role == 'student':
+            cursor.execute("""
+                SELECT roll_number, full_name, department, year, section, phone
+                FROM students WHERE user_id = ?
+            """, (user_id,))
+            student = cursor.fetchone()
+            if student:
+                user_response.update({
+                    'roll_number': student[0],
+                    'full_name': student[1],
+                    'department': student[2],
+                    'year': student[3],
+                    'section': student[4],
+                    'phone': student[5] or '',
+                })
+
+            # Update last login in students table
+            cursor.execute("UPDATE students SET last_login = ? WHERE user_id = ?",
+                          (datetime.utcnow(), user_id))
+
+        elif role == 'faculty':
+            cursor.execute("""
+                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge, timetable
+                FROM faculty_profiles WHERE user_id = ?
+            """, (user_id,))
+            faculty = cursor.fetchone()
+            if faculty:
+                user_response.update({
+                    'name': faculty[0],
+                    'full_name': faculty[0],
+                    'employee_id': faculty[1] or '',
+                    'department': faculty[2],
+                    'designation': faculty[3] or '',
+                    'subject_incharge': faculty[4] or '',
+                    'class_incharge': faculty[5] or '',
+                    'timetable': faculty[6] or '{}',
+                })
+
         conn.commit()
         conn.close()
-        
-        # Generate JWT token
+
+        # Generate JWT — include is_admin flag so frontend can show admin UI
         token = generate_jwt_token(
-            user_id=faculty[0],
-            email=faculty[1],
-            role='faculty'
+            user_id=user_id, email=user_email, role=role,
+            is_admin=bool(is_admin_flag)
         )
-        
+
+        # Add is_admin to user response so frontend stores it
+        user_response['is_admin'] = bool(is_admin_flag)
+
+        # Log success
+        log_auth_event(email, 'login_success', success=True, req=request)
+        if role == 'student':
+            log_student_activity(email, 'login', 'Logged in successfully')
+
         return jsonify({
             'success': True,
             'message': 'Login successful',
             'token': token,
-            'user': {
-                'id': faculty[0],
-                'email': faculty[1],
-                'name': faculty[2],
-                'employee_id': faculty[3],
-                'department': faculty[4],
-                'designation': faculty[5],
-                'role': 'faculty'
-            }
+            'user': user_response
         })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
+    except Exception as e:
+        print(f"Login Error: {str(e)}")
+        log_auth_event(email if 'email' in dir() else '', 'login_fail', success=False, details=str(e), req=request)
+        return jsonify({'success': False, 'error': 'Login failed. Please try again.'}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+@require_auth()
+def logout_user():
+    """Logout endpoint — logs the event (JWT is stateless, client clears token)"""
+    try:
+        user_data = request.current_user
+        email = user_data.get('email', '')
+        log_auth_event(email, 'logout', success=True, req=request)
+        return jsonify({'success': True, 'message': 'Logged out successfully'})
+    except Exception:
+        return jsonify({'success': True, 'message': 'Logged out'})
+
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@require_auth()
+def change_password():
+    """
+    Change password for the currently authenticated user.
+    Requires: current_password, new_password, confirm_new_password
+    """
+    try:
+        data = request.get_json()
+        user_data = request.current_user
+        user_id = user_data.get('user_id')
+        email = user_data.get('email', '')
+
+        current_password = data.get('current_password', '') or ''
+        new_password = data.get('new_password', '') or ''
+        confirm_new_password = data.get('confirm_new_password', '') or ''
+
+        # Validate inputs
+        if not current_password or not new_password or not confirm_new_password:
+            return jsonify({'success': False, 'error': 'All fields are required'}), 400
+
+        if new_password != confirm_new_password:
+            return jsonify({'success': False, 'error': 'New passwords do not match'}), 400
+
+        if current_password == new_password:
+            return jsonify({'success': False, 'error': 'New password must be different from current password'}), 400
+
+        # Enforce password strength
+        pw_valid, pw_error = validate_password_strength(new_password)
+        if not pw_valid:
+            return jsonify({'success': False, 'error': pw_error}), 400
+
+        # Fetch current password hash
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+
+        # Verify current password
+        if not verify_password(user[0], current_password):
+            conn.close()
+            log_auth_event(email, 'password_change_fail', success=False, details='Wrong current password', req=request)
+            return jsonify({'success': False, 'error': 'Current password is incorrect'}), 401
+
+        # Update password
+        new_hash = hash_password(new_password)
+        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        conn.commit()
+        conn.close()
+
+        log_auth_event(email, 'password_change', success=True, req=request)
+
+        return jsonify({
+            'success': True,
+            'message': 'Password changed successfully. Please login again with your new password.'
+        })
+
+    except Exception as e:
+        print(f"Change Password Error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to change password. Please try again.'}), 500
 
 
 @app.route('/api/auth/me', methods=['GET'])
 @require_auth()
 def get_current_user():
-    """Get current authenticated user info"""
+    """Get current authenticated user info from users + profile tables"""
     try:
         user_data = request.current_user
         role = user_data.get('role')
         email = user_data.get('email')
-        
+
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
         if role == 'student':
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, email, roll_number, full_name, department, year, phone
-                FROM students WHERE email = ?
+                SELECT s.id, s.email, s.roll_number, s.full_name, s.department,
+                       s.year, s.section, s.phone, s.profile_photo,
+                       s.is_verified, s.created_at, s.last_login
+                FROM students s
+                JOIN users u ON s.user_id = u.id
+                WHERE u.email = ?
             """, (email,))
             student = cursor.fetchone()
             conn.close()
-            
+
             if not student:
                 return jsonify({'error': 'User not found'}), 404
-            
+
+            import time as _time
+            photo_path = student['profile_photo']
+            photo_url = None
+            if photo_path:
+                full_path = os.path.join('static', photo_path)
+                if os.path.exists(full_path):
+                    photo_url = f"/static/{photo_path}?v={int(_time.time())}"
+
             return jsonify({
                 'success': True,
                 'user': {
-                    'id': student[0],
-                    'email': student[1],
-                    'roll_number': student[2],
-                    'full_name': student[3],
-                    'department': student[4],
-                    'year': student[5],
-                    'phone': student[6],
+                    'id': student['id'],
+                    'email': student['email'],
+                    'roll_number': student['roll_number'],
+                    'full_name': student['full_name'],
+                    'department': student['department'],
+                    'year': student['year'],
+                    'section': student['section'],
+                    'phone': student['phone'] or '',
+                    'profile_photo': photo_url,
                     'role': 'student'
                 }
             })
-        
+
         elif role == 'faculty':
-            conn = sqlite3.connect('faculty_data.db')
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, name, email, department, designation, contact
-                FROM faculty WHERE email = ?
+                SELECT fp.full_name, fp.employee_id, fp.department,
+                       fp.designation, fp.subject_incharge, fp.class_incharge,
+                       fp.phone, fp.profile_photo, fp.office_room, fp.bio,
+                       fp.linkedin, fp.github, fp.researchgate, fp.timetable,
+                       u.email, u.id
+                FROM faculty_profiles fp
+                JOIN users u ON fp.user_id = u.id
+                WHERE u.email = ?
             """, (email,))
             faculty = cursor.fetchone()
             conn.close()
-            
+
             if not faculty:
                 return jsonify({'error': 'User not found'}), 404
-            
+
+            import time as _time
+            photo_path = faculty['profile_photo']
+            photo_url = None
+            if photo_path:
+                full_path = os.path.join('static', photo_path)
+                if os.path.exists(full_path):
+                    photo_url = f"/static/{photo_path}?v={int(_time.time())}"
+
             return jsonify({
                 'success': True,
                 'user': {
                     'id': faculty['id'],
                     'email': faculty['email'],
-                    'name': faculty['name'],
+                    'name': faculty['full_name'],
+                    'full_name': faculty['full_name'],
+                    'employee_id': faculty['employee_id'] or '',
                     'department': faculty['department'],
-                    'designation': faculty['designation'],
-                    'contact': faculty['contact'],
+                    'designation': faculty['designation'] or '',
+                    'subject_incharge': faculty['subject_incharge'] or '',
+                    'class_incharge': faculty['class_incharge'] or '',
+                    'phone': faculty['phone'] or '',
+                    'profile_photo': photo_url,
+                    'office_room': faculty['office_room'] or '',
+                    'bio': faculty['bio'] or '',
+                    'linkedin': faculty['linkedin'] or '',
+                    'github': faculty['github'] or '',
+                    'researchgate': faculty['researchgate'] or '',
+                    'timetable': faculty['timetable'] or '{}',
                     'role': 'faculty'
                 }
             })
-        
+
         else:
             return jsonify({'error': 'Invalid user role'}), 400
-            
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/student/stats', methods=['GET'])
-@require_auth(['student'])
+@require_auth(allowed_roles=['student'])
 def get_student_stats():
     """Get dashboard statistics for student"""
     try:
-        email = request.current_user.get('email')
+        user_data = request.current_user
+        email = user_data.get('email')
+
+        from services.stats_service import StatsService
+        from services.limits_service import LimitsService
         
-        # Get ticket stats
-        conn = sqlite3.connect('data/tickets.db')
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM tickets WHERE student_email = ?", (email,))
-        total_tickets = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status = 'Open'", (email,))
-        pending_tickets = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status = 'Resolved'", (email,))
-        resolved_tickets = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        # Get email stats (faculty emails sent)
-        try:
-            conn = sqlite3.connect('data/email_requests.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM email_requests WHERE student_email = ?", (email,))
-            emails_sent = cursor.fetchone()[0]
-            conn.close()
-        except:
-            emails_sent = 0
-        
-        # Get recent activity
-        recent_activity = get_recent_activity(email, limit=5)
-        
+        stats = StatsService.get_student_stats(email)
+        limits = LimitsService.get_remaining_limits(email)
+        stats['limits'] = limits
+        trend = StatsService.get_weekly_chart_data(email)
+
         return jsonify({
             'success': True,
-            'stats': {
-                'total_tickets': total_tickets,
-                'pending_tickets': pending_tickets,
-                'resolved_tickets': resolved_tickets,
-                'emails_sent': emails_sent
-            },
-            'recent_activity': recent_activity
+            'stats': stats,
+            'trend': trend
         })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1133,6 +998,288 @@ def delete_student_photo():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================
+# Faculty Dashboard Endpoint (v1)
+# ============================================
+
+@app.route('/api/v1/faculty/dashboard', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_dashboard():
+    """Get faculty dashboard data: stats, 7-day trend, recent activity, timetable."""
+    try:
+        email = request.current_user.get('email')
+        full_name = request.current_user.get('full_name', '')
+
+        # --- Stats ---
+        from datetime import date, timedelta as td
+        today = date.today().isoformat()
+        seven_days_ago = (date.today() - td(days=7)).isoformat()
+
+        # Ticket stats from tickets.db
+        open_tickets = 0
+        resolved_7d = 0
+        tickets_today = 0
+        try:
+            t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
+            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE status IN ('Open','Assigned','In Progress')")
+            open_tickets = tc.fetchone()['c']
+            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE status='Resolved' AND DATE(updated_at) >= ?", (seven_days_ago,))
+            resolved_7d = tc.fetchone()['c']
+            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE DATE(created_at) = ?", (today,))
+            tickets_today = tc.fetchone()['c']
+            t_conn.close()
+        except Exception as te:
+            print(f"[DASHBOARD] Ticket stats error: {te}")
+
+        # Email stats from faculty_data.db (email_requests table)
+        unread_emails = 0
+        emails_today = 0
+        try:
+            e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+            e_conn.row_factory = sqlite3.Row
+            ec = e_conn.cursor()
+            # Count all emails addressed to this faculty (by name match)
+            ec.execute("SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ?",
+                        (f"%{full_name.lower()}%",))
+            unread_emails = ec.fetchone()['c']
+            ec.execute("SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?",
+                        (f"%{full_name.lower()}%", today))
+            emails_today = ec.fetchone()['c']
+            e_conn.close()
+        except Exception as ee:
+            print(f"[DASHBOARD] Email stats error: {ee}")
+
+        stats = {
+            'open_tickets': open_tickets,
+            'resolved_7d': resolved_7d,
+            'unread_emails': unread_emails,
+            'tickets_today': tickets_today,
+            'emails_today': emails_today,
+        }
+
+        # --- 7-Day Activity Trend ---
+        trend = []
+        for i in range(6, -1, -1):
+            d = (date.today() - td(days=i)).isoformat()
+            day_tickets = 0
+            day_emails = 0
+            try:
+                t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+                tc = t_conn.cursor()
+                tc.execute("SELECT COUNT(*) FROM tickets WHERE DATE(created_at) = ?", (d,))
+                day_tickets = tc.fetchone()[0]
+                t_conn.close()
+            except:
+                pass
+            try:
+                e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+                ec = e_conn.cursor()
+                ec.execute("SELECT COUNT(*) FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?",
+                            (f"%{full_name.lower()}%", d))
+                day_emails = ec.fetchone()[0]
+                e_conn.close()
+            except:
+                pass
+            trend.append({'date': d, 'tickets': day_tickets, 'emails': day_emails})
+
+        # --- Recent Activity ---
+        recent_tickets = []
+        try:
+            t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
+            tc.execute("SELECT ticket_id, student_email, category, sub_category, priority, status, created_at FROM tickets ORDER BY created_at DESC LIMIT 5")
+            for r in tc.fetchall():
+                recent_tickets.append(dict(r))
+            t_conn.close()
+        except Exception as rte:
+            print(f"[DASHBOARD] Recent tickets error: {rte}")
+
+        recent_emails = []
+        try:
+            e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+            e_conn.row_factory = sqlite3.Row
+            ec = e_conn.cursor()
+            ec.execute("SELECT student_name, student_email, subject, status, timestamp FROM email_requests WHERE LOWER(faculty_name) LIKE ? ORDER BY timestamp DESC LIMIT 5",
+                        (f"%{full_name.lower()}%",))
+            for r in ec.fetchall():
+                recent_emails.append(dict(r))
+            e_conn.close()
+        except Exception as ree:
+            print(f"[DASHBOARD] Recent emails error: {ree}")
+
+        # --- Timetable from faculty_profiles ---
+        timetable = {}
+        try:
+            import json as json_mod
+            s_conn = sqlite3.connect('data/students.db', timeout=10)
+            sc = s_conn.cursor()
+            sc.execute("""
+                SELECT fp.timetable 
+                FROM faculty_profiles fp 
+                JOIN users u ON fp.user_id = u.id 
+                WHERE u.email = ?
+            """, (email,))
+            row = sc.fetchone()
+            if row and row[0]:
+                timetable = json_mod.loads(row[0]) if isinstance(row[0], str) else row[0]
+            s_conn.close()
+        except Exception as tte:
+            print(f"[DASHBOARD] Timetable error: {tte}")
+
+        return jsonify({
+            'success': True,
+            'stats': stats,
+            'trend': trend,
+            'recent_tickets': recent_tickets,
+            'recent_emails': recent_emails,
+            'timetable': timetable,
+        })
+    except Exception as e:
+        print(f"[DASHBOARD] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================
+# Faculty Profile Endpoints (v1)
+# ============================================
+
+from services.faculty_profile_service import FacultyProfileService, FacultyCalendarService
+
+
+@app.route('/api/v1/faculty/profile', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_profile():
+    """Get full faculty profile."""
+    try:
+        email = request.current_user.get('email')
+        profile = FacultyProfileService.get_profile(email)
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        return jsonify({'success': True, 'profile': profile})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/profile', methods=['PUT'])
+@require_auth(['faculty'])
+def update_faculty_profile():
+    """Update editable faculty profile fields."""
+    try:
+        email = request.current_user.get('email')
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Block employee_id from being updated
+        data.pop('employee_id', None)
+
+        result = FacultyProfileService.update_profile(email, data)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify({'success': True, 'profile': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/profile/photo', methods=['POST'])
+@require_auth(['faculty'])
+def upload_faculty_photo():
+    """Upload faculty profile photo."""
+    try:
+        email = request.current_user.get('email')
+        if 'photo' not in request.files:
+            return jsonify({'error': 'No photo file provided'}), 400
+        file = request.files['photo']
+        result = FacultyProfileService.upload_photo(email, file)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/profile/photo', methods=['DELETE'])
+@require_auth(['faculty'])
+def delete_faculty_photo():
+    """Delete faculty profile photo."""
+    try:
+        email = request.current_user.get('email')
+        result = FacultyProfileService.delete_photo(email)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================
+# Faculty Calendar Endpoints
+# ============================================
+
+@app.route('/api/v1/faculty/calendar', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_calendar():
+    """Get faculty calendar events (optional: ?month=2&year=2026)."""
+    try:
+        email = request.current_user.get('email')
+        month = request.args.get('month', type=int)
+        year = request.args.get('year', type=int)
+        events = FacultyCalendarService.get_events(email, month, year)
+        return jsonify({'success': True, 'events': events})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/calendar', methods=['POST'])
+@require_auth(['faculty'])
+def add_faculty_calendar_event():
+    """Add a calendar event."""
+    try:
+        email = request.current_user.get('email')
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        result = FacultyCalendarService.add_event(email, data)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/calendar/<int:event_id>', methods=['PUT'])
+@require_auth(['faculty'])
+def update_faculty_calendar_event(event_id):
+    """Update a calendar event."""
+    try:
+        email = request.current_user.get('email')
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        result = FacultyCalendarService.update_event(email, event_id, data)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/calendar/<int:event_id>', methods=['DELETE'])
+@require_auth(['faculty'])
+def delete_faculty_calendar_event(event_id):
+    """Delete a calendar event."""
+    try:
+        email = request.current_user.get('email')
+        result = FacultyCalendarService.delete_event(email, event_id)
+        if 'error' in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/faq', methods=['POST'])
@@ -1259,6 +1406,440 @@ def email_endpoint():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# ============================================
+# Faculty Tickets Endpoints (Phase 2)
+# ============================================
+
+@app.route('/api/v1/faculty/tickets', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_tickets():
+    """Get all tickets for the faculty's department."""
+    try:
+        email = request.current_user.get('email')
+        
+        # Get faculty department
+        s_conn = sqlite3.connect('data/students.db', timeout=10)
+        sc = s_conn.cursor()
+        sc.execute("""
+            SELECT fp.department 
+            FROM faculty_profiles fp 
+            JOIN users u ON u.id = fp.user_id 
+            WHERE u.email = ?
+        """, (email,))
+        row = sc.fetchone()
+        
+        if not row or not row[0]:
+            s_conn.close()
+            return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
+            
+        department = row[0]
+        
+        # Get all students in this faculty's department
+        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
+        student_emails = [r[0] for r in sc.fetchall()]
+        s_conn.close()
+        
+        # Get tickets for these students
+        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+        t_conn.row_factory = sqlite3.Row
+        tc = t_conn.cursor()
+        
+        if student_emails:
+            placeholders = ','.join(['?'] * len(student_emails))
+            tc.execute(f"SELECT * FROM tickets WHERE student_email IN ({placeholders}) ORDER BY created_at DESC", student_emails)
+            tickets = [dict(r) for r in tc.fetchall()]
+        else:
+            tickets = []
+            
+        t_conn.close()
+        
+        return jsonify({'success': True, 'tickets': tickets, 'department': department})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/tickets/<ticket_id>', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_ticket_detail(ticket_id):
+    """Get details of a specific ticket."""
+    try:
+        email = request.current_user.get('email')
+        
+        s_conn = sqlite3.connect('data/students.db', timeout=10)
+        sc = s_conn.cursor()
+        sc.execute("""
+            SELECT fp.department 
+            FROM faculty_profiles fp 
+            JOIN users u ON u.id = fp.user_id 
+            WHERE u.email = ?
+        """, (email,))
+        row = sc.fetchone()
+        
+        if not row or not row[0]:
+            s_conn.close()
+            return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
+            
+        department = row[0]
+        
+        # Verification: Does this ticket belong to a student in the faculty's department?
+        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
+        student_emails = [r[0] for r in sc.fetchall()]
+        s_conn.close()
+        
+        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+        t_conn.row_factory = sqlite3.Row
+        tc = t_conn.cursor()
+        tc.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,))
+        ticket = tc.fetchone()
+        t_conn.close()
+        
+        if ticket and ticket['student_email'] not in student_emails:
+            ticket = None # Deny access if student not in department
+        
+        if not ticket:
+            return jsonify({'success': False, 'error': 'Ticket not found or access denied'}), 404
+            
+        return jsonify({'success': True, 'ticket': dict(ticket)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/tickets/<ticket_id>/resolve', methods=['POST'])
+@require_auth(['faculty'])
+def resolve_faculty_ticket(ticket_id):
+    """Resolve a ticket with a resolution note."""
+    try:
+        email = request.current_user.get('email')
+        faculty_id = request.current_user.get('id') or email
+        
+        data = request.get_json()
+        resolution_note = data.get('resolution_note', '').strip()
+        
+        if not resolution_note:
+            return jsonify({'success': False, 'error': 'Resolution note is required'}), 400
+            
+        s_conn = sqlite3.connect('data/students.db', timeout=10)
+        sc = s_conn.cursor()
+        sc.execute("""
+            SELECT fp.department 
+            FROM faculty_profiles fp 
+            JOIN users u ON u.id = fp.user_id 
+            WHERE u.email = ?
+        """, (email,))
+        row = sc.fetchone()
+        
+        if not row or not row[0]:
+            s_conn.close()
+            return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
+            
+        department = row[0]
+        
+        # Verification: Does this ticket belong to a student in the faculty's department?
+        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
+        student_emails = [r[0] for r in sc.fetchall()]
+        s_conn.close()
+        
+        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
+        t_conn.row_factory = sqlite3.Row
+        tc = t_conn.cursor()
+        
+        # Verify ownership
+        tc.execute("SELECT id, student_email FROM tickets WHERE ticket_id = ?", (ticket_id,))
+        ticket_row = tc.fetchone()
+        
+        if not ticket_row or ticket_row['student_email'] not in student_emails:
+            t_conn.close()
+            return jsonify({'success': False, 'error': 'Ticket not found or access denied'}), 404
+            
+        # Update ticket using UTC timestamp safely
+        from datetime import datetime
+        now = datetime.utcnow()
+        
+        tc.execute("""
+            UPDATE tickets 
+            SET status = 'Resolved',
+                updated_at = ?,
+                resolved_by = ?,
+                resolved_at = ?,
+                resolution_note = ?
+            WHERE ticket_id = ?
+        """, (now, faculty_id, now, resolution_note, ticket_id))
+        
+        t_conn.commit()
+        t_conn.close()
+        
+        return jsonify({'success': True, 'message': 'Ticket resolved successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/tickets/<ticket_id>/notify', methods=['POST'])
+@require_auth(['faculty'])
+def notify_faculty_ticket(ticket_id):
+    """Notify student about ticket resolution using EmailAgent preview flow."""
+    try:
+        email = request.current_user.get('email')
+        faculty_name = request.current_user.get('full_name', 'Faculty')
+        data = request.get_json()
+        
+        preview_mode = data.get('preview_mode', True)
+        student_email = data.get('student_email')
+        resolution_note = data.get('resolution_note', '')
+        regenerate = data.get('regenerate', False)
+        
+        if not student_email:
+            return jsonify({'success': False, 'error': 'Student email required'}), 400
+            
+        if preview_mode:
+            # Generate email preview based on resolution note
+            purpose = f"Notify student that their ticket ({ticket_id}) has been resolved. Note: {resolution_note}"
+            try:
+                subject = email_agent.generate_email_subject(f"Ticket {ticket_id} Resolved", regenerate=regenerate)
+                body = email_agent.generate_email_body(
+                    purpose=purpose,
+                    recipient_name="Student",
+                    tone="formal",
+                    length="medium",
+                    student_name=faculty_name, # Overriding student_name with faculty name for the signature
+                    regenerate=regenerate
+                )
+                return jsonify({
+                    'success': True,
+                    'subject': subject,
+                    'body': body,
+                    'preview_mode': True
+                })
+            except Exception as gen_err:
+                return jsonify({'success': False, 'error': f"Preview generation failed: {str(gen_err)}"}), 500
+                
+        else:
+            # Send the confirmed email
+            custom_subject = data.get('subject', '')
+            custom_body = data.get('body', '')
+            
+            if not custom_subject or not custom_body:
+                return jsonify({'success': False, 'error': 'Subject and body required for sending'}), 400
+                
+            result = email_agent.send_email(
+                to_email=student_email,
+                subject=custom_subject,
+                body=custom_body,
+                from_email_override=email # Just for logging
+            )
+            
+            return jsonify({
+                'success': result.get('success', False),
+                'error': result.get('error', ''),
+                'message': result.get('message', '')
+            })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+# ============================================
+# Faculty Emails Endpoints (Phase 2)
+# ============================================
+
+@app.route('/api/v1/faculty/emails', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_emails():
+    """Get all emails (received from students + sent by faculty) for the logged-in faculty."""
+    try:
+        email = request.current_user.get('email')
+        full_name = request.current_user.get('full_name', '')
+        filter_type = request.args.get('filter', 'all')  # all, pending, replied, sent
+        
+        e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+        e_conn.row_factory = sqlite3.Row
+        ec = e_conn.cursor()
+        
+        all_emails = []
+        
+        # 1) Emails RECEIVED from students (student → faculty)
+        if filter_type in ('all', 'pending', 'replied'):
+            if filter_type == 'all':
+                # Current month only for 'all' filter
+                ec.execute("""
+                    SELECT id, student_email, student_name, student_roll_no, 
+                           student_department, student_year, faculty_name, subject, 
+                           message, status, timestamp, attachment_name
+                    FROM email_requests 
+                    WHERE LOWER(faculty_name) LIKE ?
+                      AND strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')
+                    ORDER BY timestamp DESC
+                """, (f"%{full_name.lower()}%",))
+            else:
+                status_filter = 'Replied' if filter_type == 'replied' else 'Sent'
+                ec.execute("""
+                    SELECT id, student_email, student_name, student_roll_no, 
+                           student_department, student_year, faculty_name, subject, 
+                           message, status, timestamp, attachment_name
+                    FROM email_requests 
+                    WHERE LOWER(faculty_name) LIKE ?
+                      AND status = ?
+                    ORDER BY timestamp DESC
+                """, (f"%{full_name.lower()}%", status_filter))
+            
+            for r in ec.fetchall():
+                row = dict(r)
+                row['direction'] = 'received'
+                all_emails.append(row)
+        
+        # 2) Emails SENT by faculty (faculty → student) — stored as faculty_sent_emails
+        if filter_type in ('all', 'sent'):
+            try:
+                ec.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='faculty_sent_emails'")
+                if ec.fetchone():
+                    if filter_type == 'all':
+                        ec.execute("""
+                            SELECT id, recipient_email as student_email, 
+                                   recipient_email as student_name,
+                                   '' as student_roll_no, '' as student_department, '' as student_year,
+                                   sender_name as faculty_name, subject, body as message, 
+                                   'Sent' as status, sent_at as timestamp, NULL as attachment_name
+                            FROM faculty_sent_emails
+                            WHERE LOWER(sender_email) = LOWER(?)
+                              AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')
+                            ORDER BY sent_at DESC
+                        """, (email,))
+                    else:
+                        ec.execute("""
+                            SELECT id, recipient_email as student_email, 
+                                   recipient_email as student_name,
+                                   '' as student_roll_no, '' as student_department, '' as student_year,
+                                   sender_name as faculty_name, subject, body as message, 
+                                   'Sent' as status, sent_at as timestamp, NULL as attachment_name
+                            FROM faculty_sent_emails
+                            WHERE LOWER(sender_email) = LOWER(?)
+                            ORDER BY sent_at DESC
+                        """, (email,))
+                    
+                    for r in ec.fetchall():
+                        row = dict(r)
+                        row['direction'] = 'sent'
+                        # Use negative ID offset to avoid collision with received email IDs
+                        row['id'] = -row['id']
+                        all_emails.append(row)
+            except Exception:
+                pass  # Table doesn't exist yet — that's fine
+
+        e_conn.close()
+        
+        # Sort all emails by timestamp descending
+        all_emails.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        return jsonify({'success': True, 'emails': all_emails})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/emails/<int:email_id>', methods=['GET'])
+@require_auth(['faculty'])
+def get_faculty_email_detail(email_id):
+    """Get details of a specific email."""
+    try:
+        email = request.current_user.get('email')
+        full_name = request.current_user.get('full_name', '')
+        
+        e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+        e_conn.row_factory = sqlite3.Row
+        ec = e_conn.cursor()
+        
+        ec.execute("SELECT * FROM email_requests WHERE id = ? AND LOWER(faculty_name) LIKE ?", 
+                   (email_id, f"%{full_name.lower()}%"))
+        email_data = ec.fetchone()
+        e_conn.close()
+        
+        if not email_data:
+            return jsonify({'success': False, 'error': 'Email not found or access denied'}), 404
+            
+        return jsonify({'success': True, 'email': dict(email_data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/v1/faculty/emails/<int:email_id>/reply', methods=['POST'])
+@require_auth(['faculty'])
+def reply_faculty_email(email_id):
+    """Reply to a student email using EmailAgent preview flow."""
+    try:
+        faculty_email = request.current_user.get('email')
+        faculty_name = request.current_user.get('full_name', 'Faculty')
+        
+        data = request.get_json()
+        preview_mode = data.get('preview_mode', True)
+        student_email = data.get('student_email')
+        reply_intent = data.get('reply_intent', '')  # What the faculty wants to say
+        original_subject = data.get('original_subject', '')
+        regenerate = data.get('regenerate', False)
+        
+        if not student_email:
+            return jsonify({'success': False, 'error': 'Student email required'}), 400
+            
+        if preview_mode:
+            # Generate email preview based on reply intent
+            if not reply_intent:
+                return jsonify({'success': False, 'error': 'Reply intent purpose is required'}), 400
+                
+            purpose = f"Reply to student email regarding '{original_subject}'. Action/Response: {reply_intent}"
+            
+            try:
+                # Add Re: to original subject or generate new one
+                subject_prefix = "Re: " if not original_subject.startswith("Re:") else ""
+                new_subject = f"{subject_prefix}{original_subject}" if original_subject else "Reply from Faculty"
+                
+                body = email_agent.generate_email_body(
+                    purpose=purpose,
+                    recipient_name="Student",
+                    tone="formal",
+                    length="medium",
+                    student_name=faculty_name, # Signature
+                    regenerate=regenerate
+                )
+                
+                return jsonify({
+                    'success': True,
+                    'subject': new_subject,
+                    'body': body,
+                    'preview_mode': True
+                })
+            except Exception as gen_err:
+                return jsonify({'success': False, 'error': f"Preview generation failed: {str(gen_err)}"}), 500
+                
+        else:
+            # Send the confirmed email
+            custom_subject = data.get('subject', '')
+            custom_body = data.get('body', '')
+            
+            if not custom_subject or not custom_body:
+                return jsonify({'success': False, 'error': 'Subject and body required for sending'}), 400
+                
+            result = email_agent.send_email(
+                to_email=student_email,
+                subject=custom_subject,
+                body=custom_body,
+                from_email_override=faculty_email # Just for logging
+            )
+            
+            # Optionally update status in email_requests to "Replied"
+            if result.get('success'):
+                try:
+                    e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
+                    ec = e_conn.cursor()
+                    ec.execute("UPDATE email_requests SET status = 'Replied' WHERE id = ?", (email_id,))
+                    e_conn.commit()
+                    e_conn.close()
+                except Exception as db_err:
+                    print(f"Failed to update email status: {db_err}")
+            
+            return jsonify({
+                'success': result.get('success', False),
+                'error': result.get('error', ''),
+                'message': result.get('message', '')
+            })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/tickets/categories', methods=['GET'])
@@ -1653,6 +2234,70 @@ def get_email_history():
 
 
 # ============================================
+# Calendar Events API
+# ============================================
+
+@app.route('/api/calendar/events', methods=['GET'])
+@require_auth(['student'])
+def get_calendar_events():
+    """Get all calendar events for the authenticated student."""
+    try:
+        email = request.current_user.get('email')
+        events = ActivityService.get_all_events(email)
+        return jsonify({'success': True, 'events': events})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/calendar/events', methods=['POST'])
+@require_auth(['student'])
+def add_calendar_event():
+    """Manually add a calendar event from the UI."""
+    try:
+        email = request.current_user.get('email')
+        data = request.get_json()
+        title = data.get('title', '').strip()
+        event_date = data.get('event_date', '').strip()
+
+        if not title or not event_date:
+            return jsonify({'success': False, 'error': 'Title and date are required'}), 400
+
+        event_id = ActivityService.add_calendar_event(
+            student_email=email,
+            title=title,
+            event_date=event_date
+        )
+
+        if event_id:
+            ActivityService.log_activity(
+                email, ActivityType.CALENDAR_EVENT_CREATED,
+                f"Added calendar event: {title} on {event_date}")
+            # Return all events so frontend can refresh
+            all_events = ActivityService.get_all_events(email)
+            return jsonify({'success': True, 'event_id': event_id, 'events': all_events})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save event'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/calendar/events/<int:event_id>', methods=['DELETE'])
+@require_auth(['student'])
+def delete_calendar_event_endpoint(event_id):
+    """Delete a calendar event by ID (ownership validated)."""
+    try:
+        email = request.current_user.get('email')
+        deleted = ActivityService.delete_calendar_event(event_id, email)
+        if deleted:
+            all_events = ActivityService.get_all_events(email)
+            return jsonify({'success': True, 'events': all_events})
+        else:
+            return jsonify({'success': False, 'error': 'Event not found or unauthorized'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================
 # Agentic Chat Support Endpoints
 # ============================================
 
@@ -1882,7 +2527,756 @@ def get_chat_session(session_id):
 
 
 
+# ============================================
+# Faculty Assistant Chat Endpoint
+# ============================================
+
+@app.route('/api/chat/faculty-orchestrator', methods=['POST'])
+@require_auth(['faculty'])
+def faculty_chat_orchestrator():
+    """Faculty Assistant chat endpoint — routes to FacultyOrchestratorAgent."""
+    try:
+        data = request.get_json() or {}
+        user_message = (data.get('message') or '').strip()
+        session_id = data.get('session_id') or 'faculty-default'
+
+        if not user_message:
+            return jsonify({'error': 'Message is required'}), 400
+
+        # Faculty identity from JWT (set by @require_auth)
+        faculty_payload = request.current_user
+        faculty_email = faculty_payload.get('email', '')
+
+        # Fetch full_name from faculty_profiles
+        faculty_profile = {}
+        try:
+            conn = sqlite3.connect('data/students.db', timeout=5)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT fp.full_name, fp.department, fp.designation, fp.employee_id
+                FROM faculty_profiles fp
+                JOIN users u ON u.id = fp.user_id
+                WHERE LOWER(u.email) = LOWER(?)
+                LIMIT 1
+            """, (faculty_email,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                faculty_profile = dict(row)
+        except Exception as db_err:
+            print(f'[FACULTY_CHAT] Profile fetch error: {type(db_err).__name__}')
+
+        faculty_profile['email'] = faculty_email
+
+        result = faculty_orchestrator_agent.process_message(
+            message=user_message,
+            user_id=faculty_email,
+            session_id=session_id,
+            faculty_profile=faculty_profile,
+        )
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+
+@app.route('/api/chat/faculty-orchestrator/confirm-email', methods=['POST'])
+@require_auth(['faculty'])
+def faculty_confirm_email():
+    """
+    Called by the ConfirmationCard when faculty clicks 'Send Email', 'Regenerate', or 'Cancel'.
+    Body: { session_id, confirmed: bool, edited_draft?: { subject, body }, regenerate?: bool }
+    """
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id', 'faculty-default')
+        confirmed = data.get('confirmed', False)
+        edited = data.get('edited_draft') or {}
+        regenerate = bool(data.get('regenerate', False))
+
+        if not confirmed and not regenerate:
+            # Cancel — clear the flow
+            from agents.faculty_orchestrator_agent import _clear_flow
+            _clear_flow(session_id)
+            return jsonify({'success': True, 'message': '🚫 Email cancelled. Draft discarded.'})
+
+        result = faculty_orchestrator_agent.execute_email_send(
+            session_id=session_id,
+            edited_subject=edited.get('subject'),
+            edited_body=edited.get('body'),
+            regenerate=regenerate,
+        )
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chat/faculty-orchestrator/confirm-resolve', methods=['POST'])
+@require_auth(['faculty'])
+def faculty_confirm_resolve():
+    """
+    Called by the ConfirmationCard when faculty clicks 'Resolve', 'Regenerate', or 'Cancel'
+    on the ticket resolution preview card.
+    Body: { session_id, confirmed: bool, edited_note?: str, regenerate?: bool }
+    """
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id', 'faculty-default')
+        confirmed = data.get('confirmed', False)
+        edited_note = data.get('edited_note')
+        regenerate = bool(data.get('regenerate', False))
+        faculty_email = request.current_user.get('email', '')
+
+        if not confirmed and not regenerate:
+            # Cancel — clear the flow
+            from agents.faculty_orchestrator_agent import _clear_flow
+            _clear_flow(session_id)
+            return jsonify({'success': True, 'message': '🚫 Ticket resolution cancelled.'})
+
+        result = faculty_orchestrator_agent.execute_ticket_resolve(
+            session_id=session_id,
+            faculty_email=faculty_email,
+            edited_note=edited_note,
+            regenerate=regenerate,
+        )
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================
+# Admin Endpoints
+# All protected by require_admin=True
+# (is_admin flag in JWT — works for faculty accounts with admin privileges)
+# ============================================
+
+@app.route('/api/admin/dashboard', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_dashboard():
+    """Admin dashboard: total users, tickets overview, last 10 system-wide activity rows."""
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM students")
+        total_students = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM faculty_profiles")
+        total_faculty = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(DISTINCT department) FROM students")
+        total_departments = cursor.fetchone()[0]
+
+        # Last 10 student activities across all students
+        cursor.execute("""
+            SELECT student_email, action_type, action_description, created_at
+            FROM student_activity
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+        activity_rows = cursor.fetchall()
+        recent_activity = []
+        for r in activity_rows:
+            # Parse action_description for extra details if possible
+            details = {}
+            desc = r[2] or ''
+            if 'category' in desc.lower():
+                details['category'] = desc
+            if 'ticket' in desc.lower():
+                details['ticket_id'] = desc
+            recent_activity.append({
+                'student_email': r[0],
+                'action_type': r[1],
+                'details': details,
+                'timestamp': r[3]
+            })
+        conn.close()
+
+        # Ticket counts
+        open_tickets = 0
+        resolved_tickets = 0
+        try:
+            tconn = sqlite3.connect('data/tickets.db')
+            tcur = tconn.cursor()
+            tcur.execute("SELECT COUNT(*) FROM tickets WHERE status = 'Open'")
+            open_tickets = tcur.fetchone()[0]
+            tcur.execute("SELECT COUNT(*) FROM tickets WHERE status IN ('Resolved', 'Closed')")
+            resolved_tickets = tcur.fetchone()[0]
+            tconn.close()
+        except Exception as te:
+            print(f"[ADMIN] Ticket count error: {te}")
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_students': total_students,
+                'total_faculty': total_faculty,
+                'total_departments': total_departments,
+                'open_tickets': open_tickets,
+                'resolved_tickets': resolved_tickets,
+                'recent_activity': recent_activity
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/dashboard/ticket-trends', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_ticket_trends():
+    """Weekly ticket created vs resolved trends for the last 8 weeks."""
+    try:
+        conn = sqlite3.connect('data/tickets.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Pure SQLite approach: Generate last 8 weeks, LEFT JOIN with created and resolved counts.
+        # This completely avoids Python-SQLite strftime mismatches.
+        cursor.execute("""
+            WITH RECURSIVE weeks(start_date) AS (
+                -- Start exactly 7 weeks ago from the most recent Monday
+                SELECT date('now', 'localtime', 'weekday 1', '-49 days')
+                UNION ALL
+                SELECT date(start_date, '+7 days')
+                FROM weeks
+                WHERE start_date < date('now', 'localtime', 'weekday 1')
+            ),
+            created_counts AS (
+                SELECT date(created_at, 'weekday 1') as wk_start, COUNT(*) as c_count
+                FROM tickets
+                GROUP BY wk_start
+            ),
+            resolved_counts AS (
+                SELECT date(updated_at, 'weekday 1') as wk_start, COUNT(*) as r_count
+                FROM tickets
+                WHERE status IN ('Resolved', 'Closed')
+                GROUP BY wk_start
+            )
+            SELECT 
+                w.start_date,
+                COALESCE(c.c_count, 0) as created,
+                COALESCE(r.r_count, 0) as resolved
+            FROM weeks w
+            LEFT JOIN created_counts c ON w.start_date = c.wk_start
+            LEFT JOIN resolved_counts r ON w.start_date = r.wk_start
+            ORDER BY w.start_date ASC
+        """)
+        
+        weeks_data = []
+        for row in cursor.fetchall():
+            # Format display label (e.g., "Mar 02")
+            dt = datetime.strptime(row['start_date'], '%Y-%m-%d')
+            weeks_data.append({
+                'week': dt.strftime('%b %d'),
+                'created': row['created'],
+                'resolved': row['resolved']
+            })
+
+        conn.close()
+        return jsonify({'success': True, 'data': weeks_data})
+    except Exception as e:
+        print(f"[ADMIN] Ticket trends error: {e}")
+        return jsonify({'success': True, 'data': []})
+
+
+@app.route('/api/admin/departments', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_get_departments():
+    """Return list of valid departments."""
+    return jsonify({'success': True, 'data': VALID_DEPARTMENTS})
+
+
+@app.route('/api/admin/users/students', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_list_students():
+    """List students filtered by department (required) and optional name/roll query."""
+    dept = (request.args.get('dept', '') or '').strip().upper()
+    q = (request.args.get('q', '') or '').strip()
+
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = """
+            SELECT s.id, s.email, s.roll_number, s.full_name,
+                   s.department, s.year, s.section, s.phone,
+                   s.created_at, s.last_login,
+                   u.id as user_id, COALESCE(u.is_active, 1) as is_active,
+                   COALESCE(u.is_admin, 0) as is_admin
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE 1=1
+        """
+        params = []
+        if dept:
+            query += " AND s.department = ?"
+            params.append(dept)
+        if q:
+            query += " AND (LOWER(s.full_name) LIKE ? OR LOWER(s.roll_number) LIKE ? OR LOWER(s.email) LIKE ?)"
+            q_like = f'%{q.lower()}%'
+            params.extend([q_like, q_like, q_like])
+            
+        query += " ORDER BY s.full_name ASC LIMIT 50"
+        cursor.execute(query, params)
+
+        students = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            d['name'] = d.get('full_name', '') # Map for frontend
+            students.append(d)
+        conn.close()
+        return jsonify({'success': True, 'data': students, 'count': len(students)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/faculty', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_list_faculty():
+    """List faculty filtered by department (required) and optional name/employee_id query."""
+    dept = (request.args.get('dept', '') or '').strip().upper()
+    q = (request.args.get('q', '') or '').strip()
+
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = """
+            SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
+                   fp.designation, fp.subject_incharge, fp.class_incharge,
+                   u.email, u.id as user_id,
+                   COALESCE(u.is_active, 1) as is_active,
+                   COALESCE(u.is_admin, 0) as is_admin,
+                   u.created_at
+            FROM faculty_profiles fp
+            JOIN users u ON fp.user_id = u.id
+            WHERE 1=1
+        """
+        params = []
+        if dept:
+            query += " AND fp.department = ?"
+            params.append(dept)
+        if q:
+            query += " AND (LOWER(fp.full_name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
+            q_like = f'%{q.lower()}%'
+            params.extend([q_like, q_like, q_like])
+            
+        query += " ORDER BY fp.full_name ASC LIMIT 50"
+        cursor.execute(query, params)
+
+        faculty = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            d['name'] = d.get('full_name', '') # Map for frontend
+            faculty.append(d)
+        conn.close()
+        return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<int:user_id>', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_get_user(user_id):
+    """Read-only profile for any user by users.id."""
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, role, email, email_verified,
+                   COALESCE(is_active, 1) as is_active,
+                   COALESCE(is_admin, 0) as is_admin,
+                   created_at
+            FROM users WHERE id = ?
+        """, (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+
+        result = dict(user)
+        role = result['role']
+
+        if role == 'student':
+            cursor.execute("""
+                SELECT roll_number, full_name, department, year, section, phone, last_login
+                FROM students WHERE user_id = ?
+            """, (user_id,))
+            profile = cursor.fetchone()
+            if profile:
+                result.update(dict(profile))
+        elif role == 'faculty':
+            cursor.execute("""
+                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
+                FROM faculty_profiles WHERE user_id = ?
+            """, (user_id,))
+            profile = cursor.fetchone()
+            if profile:
+                result.update(dict(profile))
+
+        result['name'] = result.get('full_name', '')
+        conn.close()
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<int:user_id>/toggle-active', methods=['POST'])
+@require_auth(require_admin=True)
+def admin_toggle_user_active(user_id):
+    """Toggle is_active for any user. Returns new status."""
+    try:
+        # Prevent admin self-lockout
+        admin_user_id = request.current_user.get('user_id')
+        if admin_user_id and int(admin_user_id) == int(user_id):
+            return jsonify({'success': False, 'error': 'Cannot deactivate your own admin account'}), 400
+
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT email, COALESCE(is_active, 1) FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        target_email, current_active = row
+        new_active = 0 if current_active else 1
+        cursor.execute("UPDATE users SET is_active = ? WHERE id = ?", (new_active, user_id))
+        conn.commit()
+        conn.close()
+        status = 'activated' if new_active else 'deactivated'
+        return jsonify({'success': True, 'new_status': bool(new_active), 'is_active': bool(new_active), 'message': f'Account {status}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
+@require_auth(require_admin=True)
+def admin_reset_password(user_id):
+    """Admin resets a user's password to a provided temporary password."""
+    try:
+        data = request.get_json() or {}
+        new_password = (data.get('new_password', '') or '').strip()
+        if not new_password:
+            return jsonify({'success': False, 'error': 'new_password is required'}), 400
+        pw_valid, pw_error = validate_password_strength(new_password)
+        if not pw_valid:
+            return jsonify({'success': False, 'error': pw_error}), 400
+
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+
+        new_hash = hash_password(new_password)
+        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Password reset successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/tickets', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_list_tickets():
+    """All tickets across all departments, with optional status filter."""
+    status_filter = (request.args.get('status', 'all') or 'all').strip()
+    try:
+        conn = sqlite3.connect('data/tickets.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        if status_filter and status_filter.lower() != 'all':
+            cursor.execute("""
+                SELECT ticket_id, student_email, category, sub_category, status,
+                       department, priority, created_at, updated_at, description
+                FROM tickets
+                WHERE LOWER(status) = LOWER(?)
+                ORDER BY created_at DESC
+                LIMIT 200
+            """, (status_filter,))
+        else:
+            cursor.execute("""
+                SELECT ticket_id, student_email, category, sub_category, status,
+                       department, priority, created_at, updated_at, description
+                FROM tickets
+                ORDER BY created_at DESC
+                LIMIT 200
+            """)
+        tickets = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        # Root fix: Enrich with student names from students.db (cannot JOIN across DBs easily in SQLite)
+        try:
+            sconn = sqlite3.connect(AUTH_DB_PATH)
+            scursor = sconn.cursor()
+            scursor.execute("SELECT email, full_name FROM students")
+            student_map = {row[0]: row[1] for row in scursor.fetchall()}
+            sconn.close()
+            
+            for t in tickets:
+                t['student_name'] = student_map.get(t['student_email'], 'N/A')
+        except Exception as se:
+            print(f"[ADMIN] Student mapping error: {se}")
+
+        return jsonify({
+            'success': True,
+            'data': tickets
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/tickets/<ticket_id>/force-close', methods=['POST'])
+@require_auth(require_admin=True)
+def admin_force_close_ticket(ticket_id):
+    """Force close any ticket regardless of owner."""
+    try:
+        conn = sqlite3.connect('data/tickets.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT ticket_id FROM tickets WHERE ticket_id = ?", (ticket_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'Ticket not found'}), 404
+        cursor.execute(
+            "UPDATE tickets SET status = 'Closed', updated_at = ? WHERE ticket_id = ?",
+            (datetime.utcnow(), ticket_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': f'Ticket {ticket_id} force-closed'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ---- Announcements CRUD ----
+
+@app.route('/api/admin/announcements', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_list_announcements():
+    """List all announcements, newest first."""
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, title, body, target, created_by, created_at, updated_at, is_active
+            FROM announcements ORDER BY created_at DESC
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'data': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/announcements', methods=['POST'])
+@require_auth(require_admin=True)
+def admin_create_announcement():
+    """Create a new announcement."""
+    try:
+        data = request.get_json() or {}
+        title = (data.get('title', '') or '').strip()
+        body = (data.get('body', '') or '').strip()
+        target = (data.get('target', 'all') or 'all').strip().lower()
+        if not title or not body:
+            return jsonify({'success': False, 'error': 'title and body are required'}), 400
+        if target not in ('student', 'faculty', 'all'):
+            return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
+
+        admin_email = request.current_user.get('email', 'admin')
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO announcements (title, body, target, created_by, created_at, updated_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+        """, (title, body, target, admin_email, datetime.utcnow(), datetime.utcnow()))
+        new_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'id': new_id, 'message': 'Announcement created'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/announcements/<int:ann_id>', methods=['PUT'])
+@require_auth(require_admin=True)
+def admin_update_announcement(ann_id):
+    """Edit an existing announcement."""
+    try:
+        data = request.get_json() or {}
+        title = (data.get('title', '') or '').strip()
+        body = (data.get('body', '') or '').strip()
+        target = (data.get('target', 'all') or 'all').strip().lower()
+        is_active = data.get('is_active', 1)
+        if isinstance(is_active, bool):
+            is_active = 1 if is_active else 0
+        is_active = int(is_active) if is_active is not None else 1
+
+        if not title or not body:
+            return jsonify({'success': False, 'error': 'title and body are required'}), 400
+        if target not in ('student', 'faculty', 'all'):
+            return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
+
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM announcements WHERE id = ?", (ann_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'Announcement not found'}), 404
+        cursor.execute("""
+            UPDATE announcements SET title=?, body=?, target=?, is_active=?, updated_at=? WHERE id=?
+        """, (title, body, target, is_active, datetime.utcnow(), ann_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Announcement updated'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/announcements/<int:ann_id>', methods=['DELETE'])
+@require_auth(require_admin=True)
+def admin_delete_announcement(ann_id):
+    """Delete an announcement."""
+    try:
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM announcements WHERE id = ?", (ann_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'error': 'Announcement not found'}), 404
+        cursor.execute("DELETE FROM announcements WHERE id = ?", (ann_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Announcement deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/announcements/active', methods=['GET'])
+@require_auth(allowed_roles=['student', 'faculty'])
+def get_active_announcements():
+    """Get active announcements relevant to the calling user's role.
+    Students see target='student' or 'all'; faculty see target='faculty' or 'all'.
+    """
+    try:
+        user_role = request.current_user.get('role', 'student')
+        conn = sqlite3.connect(AUTH_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, title, body, target, created_at
+            FROM announcements
+            WHERE is_active = 1
+              AND (target = 'all' OR target = ?)
+            ORDER BY created_at DESC
+            LIMIT 10
+        """, (user_role,))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'data': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ---- Reports ----
+
+@app.route('/api/admin/reports/tickets', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_report_tickets():
+    """Department-wise ticket breakdown: open, resolved, closed counts."""
+    try:
+        conn = sqlite3.connect('data/tickets.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                COALESCE(department, 'Unknown') as department,
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open,
+                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
+                SUM(CASE WHEN status = 'Resolved' THEN 1 ELSE 0 END) as resolved,
+                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
+            FROM tickets
+            GROUP BY COALESCE(department, 'Unknown')
+            ORDER BY total DESC
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'data': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/reports/email-usage', methods=['GET'])
+@require_auth(require_admin=True)
+def admin_report_email_usage():
+    """Email agent usage split: student emails vs faculty emails, total and last 7 days."""
+    from datetime import timedelta
+    import pytz
+    IST = pytz.timezone('Asia/Kolkata')
+    today = datetime.now(IST).date()
+    week_ago = (today - timedelta(days=6)).strftime('%Y-%m-%d')
+
+    result = {
+        'student': {'total': 0, 'last_7_days': 0},
+        'faculty': {'total': 0, 'last_7_days': 0},
+    }
+
+    # Student emails from email_requests.db (faculty_data.db)
+    try:
+        conn = sqlite3.connect('data/faculty_data.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM email_requests")
+        result['student']['total'] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM email_requests WHERE DATE(created_at) >= ?", (week_ago,))
+        result['student']['last_7_days'] = cursor.fetchone()[0]
+        conn.close()
+    except Exception as e:
+        print(f"[ADMIN] Student email stats error: {e}")
+
+    # Faculty sent emails from faculty_data.db sent_emails table (if exists)
+    try:
+        conn = sqlite3.connect('data/faculty_data.db')
+        cursor = conn.cursor()
+        # Check if sent_emails table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_emails'")
+        if cursor.fetchone():
+            cursor.execute("SELECT COUNT(*) FROM sent_emails")
+            result['faculty']['total'] = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM sent_emails WHERE DATE(sent_at) >= ?", (week_ago,))
+            result['faculty']['last_7_days'] = cursor.fetchone()[0]
+        conn.close()
+    except Exception as e:
+        print(f"[ADMIN] Faculty email stats error: {e}")
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'student_total': result['student']['total'],
+            'student_last7days': result['student']['last_7_days'],
+            'faculty_total': result['faculty']['total'],
+            'faculty_last7days': result['faculty']['last_7_days'],
+        }
+    })
+
+
 if __name__ == '__main__':
+
     print("=" * 60)
     print("  ACE Engineering College - Student Support System")
     print("=" * 60)

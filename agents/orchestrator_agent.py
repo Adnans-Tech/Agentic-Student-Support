@@ -16,13 +16,14 @@ import json
 import re
 import hashlib
 import os
+import time
 import traceback
 from typing import Dict, Optional, List, Any
 from enum import Enum
 from datetime import datetime
 
 from langchain_groq import ChatGroq
-from config import GROQ_API_KEY, DEFAULT_FACULTY_EMAIL
+from core.config import GROQ_API_KEY, DEFAULT_FACULTY_EMAIL
 
 # --- Agent & Service Imports ---
 try:
@@ -80,8 +81,11 @@ MAX_SESSION_MESSAGES = 50
 CONFIDENCE_THRESHOLDS = {
     "FAQ": 0.45,
     "EMAIL": 0.65,
+    "EMAIL_HISTORY": 0.50,
     "TICKET": 0.65,
     "TICKET_STATUS": 0.50,
+    "CALENDAR": 0.55,
+    "PROFILE_SUMMARY": 0.45,
     "GREETING": 0.30,
 }
 
@@ -98,11 +102,18 @@ EDIT_KEYWORDS = frozenset([
 ])
 
 
+# Flow-level TTL for stale flow detection (seconds)
+FLOW_STALE_TTL = 600  # 10 minutes
+
+
 class IntentType(str, Enum):
     FAQ = "FAQ"
     EMAIL = "EMAIL"
+    EMAIL_HISTORY = "EMAIL_HISTORY"
     TICKET = "TICKET"
     TICKET_STATUS = "TICKET_STATUS"
+    CALENDAR = "CALENDAR"
+    PROFILE_SUMMARY = "PROFILE_SUMMARY"
     GREETING = "GREETING"
     UNKNOWN = "UNKNOWN"
 
@@ -211,7 +222,91 @@ class OrchestratorAgent:
         return resp
 
     # =========================================================================
-    # INTENT CLASSIFICATION (single LLM call)
+    # DETERMINISTIC PRE-ROUTER (runs before LLM, catches high-signal phrases)
+    # =========================================================================
+    def _pre_classify_intent(self, message: str) -> Optional[str]:
+        """
+        Lightweight regex-based pre-classification.
+        Returns intent string if high-confidence match, None otherwise.
+        Runs in <1ms. Skips LLM when matched.
+        """
+        msg_lower = message.lower().strip()
+
+        # --- Negative guards: compose-intent phrases that should NOT match history ---
+        compose_guard = re.search(
+            r'\b(send|compose|write|draft|mail\s+to|email\s+to|to\s+dr|to\s+prof)\b',
+            msg_lower)
+
+        # --- EMAIL_HISTORY (view/list sent emails) ---
+        if not compose_guard:
+            email_hist_patterns = [
+                r'\b(past|sent|previous|show|view|list|all)\s+(emails?)\b',
+                r'\bemail\s+(history|log|records?)\b',
+                r'\bemails?\s+(i\s+sent|sent\s+by\s+me)\b',
+                r'\b(show|view|list|get)\b.*\bemails?\b',
+                r'\bhow\s+many\s+emails\s+(sent|did\s+i)\b',
+            ]
+            for pattern in email_hist_patterns:
+                if re.search(pattern, msg_lower):
+                    print(f"[PRE-ROUTER] EMAIL_HISTORY matched: {pattern}")
+                    return "EMAIL_HISTORY"
+
+        # --- TICKET_STATUS (view/list/check/close tickets) ---
+        ticket_view_patterns = [
+            r'\b(my|all|past|previous|show|view|list|check)\s+tickets?\b',
+            r'\bticket\s+(status|history|list)\b',
+            r'\b(previous|past)\s+(complaints?|tickets?)\b',
+            r'\bclose\s+(all\s+)?tickets?\b',
+        ]
+        for pattern in ticket_view_patterns:
+            if re.search(pattern, msg_lower):
+                print(f"[PRE-ROUTER] TICKET_STATUS matched: {pattern}")
+                return "TICKET_STATUS"
+
+        # --- CALENDAR (add/view events, mark dates, schedule queries) ---
+        calendar_patterns = [
+            r'\b(add|mark|set|schedule|create)\b.*\b(calendar|date|event|reminder)\b',
+            r'\b(remind\s+me|important\s+date)\b',
+            r'\b(add|mark)\s+.*\b(exam|holiday|deadline|leave)\b',
+            r'\b(my|show|view|upcoming)\s+(events?|calendar|dates?|schedule)\b',
+            r'\bwhat.?s\s+on\s+my\s+schedule\b',
+            r'\bany\s+events?\s+(this|next)\s+(week|month)\b',
+            r'\bdo\s+i\s+have\s+(anything|any\s*thing|events?)\s+on\b',
+            r'\b(what|anything)\s+(is\s+)?(on|happening|scheduled)\s+(on\s+)?\w+\s+\d{1,2}\b',
+            r'\bmy\s+(upcoming|next)\s+(events?|deadlines?)\b',
+            r'\bdelete\s+(event|calendar)\b',
+            r'\bremove\s+(event|calendar)\b',
+        ]
+        for pattern in calendar_patterns:
+            if re.search(pattern, msg_lower):
+                print(f"[PRE-ROUTER] CALENDAR matched: {pattern}")
+                return "CALENDAR"
+
+        # --- PROFILE_SUMMARY ---
+        profile_patterns = [
+            r'\b(my|show)\s+(profile|summary|stats|activity|dashboard)\b',
+            r'\bprofile\s+summary\b',
+        ]
+        for pattern in profile_patterns:
+            if re.search(pattern, msg_lower):
+                print(f"[PRE-ROUTER] PROFILE_SUMMARY matched: {pattern}")
+                return "PROFILE_SUMMARY"
+
+        # --- GREETING (simple greetings) ---
+        greeting_patterns = [
+            r'^(hi|hello|hey|good\s+(morning|afternoon|evening)|greetings?)[\s!.?]*$',
+            r'^(bye|goodbye|see\s+you|thanks?|thank\s+you)[\s!.?]*$',
+            r'\bwhat\s+can\s+you\s+do\b',
+        ]
+        for pattern in greeting_patterns:
+            if re.search(pattern, msg_lower):
+                print(f"[PRE-ROUTER] GREETING matched: {pattern}")
+                return "GREETING"
+
+        return None  # No high-signal match → fall through to LLM
+
+    # =========================================================================
+    # INTENT CLASSIFICATION (LLM call — only when pre-router doesn't match)
     # =========================================================================
     def _classify_intent(self, message: str, history_text: str) -> Dict:
         prompt = f"""You are an intent classifier for a college student support chatbot.
@@ -219,16 +314,22 @@ class OrchestratorAgent:
 INTENT TYPES:
 - FAQ: Asking about college policies, rules, courses, fees, attendance, placements, hostel, library
 - EMAIL: Wants to compose/send an email to faculty or external contact
+- EMAIL_HISTORY: Wants to VIEW/LIST previously sent emails, email history, past emails (NOT compose)
 - TICKET: Wants to raise a NEW support ticket or complaint
-- TICKET_STATUS: Check status of existing tickets, close tickets, view history
+- TICKET_STATUS: Check status of existing tickets, close tickets, view ticket history, list tickets
+- CALENDAR: Wants to add/view calendar events, mark important dates, set reminders
+- PROFILE_SUMMARY: Wants to see their profile stats, activity summary, usage totals
 - GREETING: Hello, hi, thanks, bye, "what can you do", capability questions
 - UNKNOWN: Cannot determine
 
 RULES:
 - Questions about college info -> FAQ
 - "send email", "write email", "email to", "contact professor" -> EMAIL
+- "show sent emails", "past emails", "email history" -> EMAIL_HISTORY (NEVER EMAIL)
 - "raise ticket", "create ticket", "report issue", "complaint" -> TICKET
-- "check ticket", "ticket status", "close ticket" -> TICKET_STATUS
+- "check ticket", "ticket status", "close ticket", "my tickets" -> TICKET_STATUS
+- "add to calendar", "mark date", "remind me", "schedule event" -> CALENDAR
+- "my profile", "my summary", "my stats", "my activity" -> PROFILE_SUMMARY
 - Capability questions like "can you send emails?" -> GREETING (NOT EMAIL)
 - If message is just a greeting/thanks/bye -> GREETING
 
@@ -241,6 +342,8 @@ ENTITY EXTRACTION RULES (CRITICAL):
   - "send email to test@email.com regarding exam schedule" → purpose: "exam schedule"
   - "contact faculty for notes" → purpose: "notes"
 - ticket_description: Description of the issue/complaint
+- event_title: Title/name of the calendar event
+- event_date: Date for the calendar event (e.g., "March 5", "2026-03-05")
 
 CONVERSATION HISTORY:
 {history_text if history_text else "(none)"}
@@ -248,7 +351,7 @@ CONVERSATION HISTORY:
 STUDENT MESSAGE: "{message}"
 
 Return ONLY valid JSON:
-{{"intent":"FAQ|EMAIL|TICKET|TICKET_STATUS|GREETING|UNKNOWN","confidence":0.85,"entities":{{"faculty_name":null,"email_address":null,"purpose":null,"ticket_description":null}},"reasoning":"brief"}}"""
+{{"intent":"FAQ|EMAIL|EMAIL_HISTORY|TICKET|TICKET_STATUS|CALENDAR|PROFILE_SUMMARY|GREETING|UNKNOWN","confidence":0.85,"entities":{{"faculty_name":null,"email_address":null,"purpose":null,"ticket_description":null,"event_title":null,"event_date":null}},"reasoning":"brief"}}"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -268,7 +371,18 @@ Return ONLY valid JSON:
             confidence = max(0.0, min(1.0, float(result.get("confidence", 0.5))))
             entities = result.get("entities", {})
 
-            # Extract email from message if LLM missed it
+            # Validate LLM extracted email
+            extracted_email = entities.get("email_address")
+            if extracted_email and isinstance(extracted_email, str):
+                extracted_email = extracted_email.strip()
+                # Strict check for standard email format
+                if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', extracted_email):
+                    # If it's not a valid email format but it's a single word or name-like, it might be a faculty name
+                    if not entities.get("faculty_name") and len(extracted_email) > 1 and len(extracted_email) < 30:
+                        entities["faculty_name"] = extracted_email
+                    entities["email_address"] = None
+
+            # Extract email from message if LLM missed it or we just cleared it
             email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', message)
             if email_match and not entities.get("email_address"):
                 entities["email_address"] = email_match.group()
@@ -285,8 +399,19 @@ Return ONLY valid JSON:
     # MAIN ENTRY POINT
     # =========================================================================
     def process_message(self, user_message: str, user_id: str, session_id: str,
-                        mode: str = "auto", student_profile: Optional[Dict] = None) -> Dict:
+                        mode: str = "auto", student_profile: Optional[Dict] = None,
+                        _reroute_depth: int = 0) -> Dict:
         print(f"[ORCHESTRATOR] '{user_message[:80]}' (user={user_id})")
+
+        # --- Recursion guard: prevent infinite reroute loops ---
+        if _reroute_depth > 1:
+            print("[GUARD] Max reroute depth reached — returning clarification")
+            return self._make_response(
+                "I'm having trouble understanding. Could you rephrase?",
+                response_type="clarification_request",
+                session_id=session_id, user_id=user_id,
+                user_message=user_message, intent="UNKNOWN",
+                student_profile=student_profile)
 
         update_session_activity(session_id)
         if check_session_timeout(session_id):
@@ -298,7 +423,7 @@ Return ONLY valid JSON:
         state = resume_flow(session_id, "active") or {}
         active_flow = state.get("active_flow")
 
-        # --- Cancel check ---
+        # --- Cancel/exit check ---
         if msg_lower in CANCEL_KEYWORDS and active_flow:
             clear_flow(session_id, "active")
             return self._make_response(
@@ -306,6 +431,33 @@ Return ONLY valid JSON:
                 session_id=session_id, user_id=user_id,
                 user_message=user_message, intent="GREETING",
                 student_profile=student_profile)
+
+        # --- Flow TTL: auto-clear stale flows ---
+        if active_flow:
+            flow_last_updated = state.get("last_updated", 0)
+            flow_age = time.time() - flow_last_updated if flow_last_updated else float('inf')
+            if flow_age > FLOW_STALE_TTL:
+                print(f"[FLOW] Stale flow '{active_flow}' (age={flow_age:.0f}s) — auto-clearing")
+                clear_flow(session_id, "active")
+                active_flow = None
+                state = {}
+
+        # --- Centralized escape: if active flow, pre-check intent before trapping ---
+        if active_flow:
+            pre_intent = self._pre_classify_intent(user_message)
+            # Map active flow names to their intent
+            flow_intent_map = {"email": "EMAIL", "ticket": "TICKET", "calendar": "CALENDAR"}
+            flow_intent = flow_intent_map.get(active_flow)
+
+            if pre_intent and pre_intent != flow_intent:
+                print(f"[ESCAPE] Active flow '{active_flow}' but pre-router says '{pre_intent}' — rerouting")
+                clear_flow(session_id, "active")
+                active_flow = None
+                state = {}
+                # Route directly to the matched handler instead of recursion
+                return self._route_to_handler(
+                    pre_intent, 1.0, {}, user_message, user_id, session_id,
+                    student_profile, _reroute_depth + 1)
 
         # --- Active flow -> route to handler ---
         if active_flow:
@@ -321,7 +473,15 @@ Return ONLY valid JSON:
             else:
                 clear_flow(session_id, "active")
 
-        # --- Classify intent via LLM ---
+        # --- Step 1: Try deterministic pre-router (no LLM cost) ---
+        pre_intent = self._pre_classify_intent(user_message)
+        if pre_intent:
+            print(f"[ROUTE] Pre-router matched: {pre_intent} (no LLM call)")
+            return self._route_to_handler(
+                pre_intent, 1.0, {}, user_message, user_id, session_id,
+                student_profile, _reroute_depth)
+
+        # --- Step 2: LLM classification (fallback) ---
         history_text = self._get_history_text(session_id, user_id)
         cls = self._classify_intent(user_message, history_text)
         intent = cls["intent"]
@@ -340,27 +500,44 @@ Return ONLY valid JSON:
                     "Could you please clarify what you'd like help with?\n\n"
                     "• **Ask about college policies/fees**\n"
                     "• **Send an email** to faculty or contacts\n"
+                    "• **View sent emails** or email history\n"
                     "• **Raise a ticket** for issues\n"
-                    "• **Check ticket status**",
+                    "• **Check ticket status** or view tickets\n"
+                    "• **Add calendar event** or mark dates\n"
+                    "• **My profile summary**",
                     response_type="clarification_request",
                     session_id=session_id, user_id=user_id,
                     user_message=user_message, intent=intent,
                     confidence=confidence, student_profile=student_profile)
 
         # --- Route ---
-        print(f"[ROUTE] {intent}")
+        return self._route_to_handler(
+            intent, confidence, entities, user_message, user_id, session_id,
+            student_profile, _reroute_depth)
+
+    def _route_to_handler(self, intent, confidence, entities, user_message,
+                          user_id, session_id, student_profile, _reroute_depth=0):
+        """Central routing method — maps intent to handler."""
+        print(f"[ROUTE] {intent} (conf={confidence:.2f})")
+
         if intent == "FAQ":
             return self._handle_faq(user_message, user_id, session_id, student_profile, entities)
         elif intent == "EMAIL":
             clear_flow(session_id, "active")  # Prevent stale state from old flows
             return self._handle_email_flow(
                 user_message, user_id, session_id, student_profile, entities, {})
+        elif intent == "EMAIL_HISTORY":
+            return self._handle_email_history(user_message, user_id, session_id, student_profile)
         elif intent == "TICKET":
             clear_flow(session_id, "active")  # Prevent stale state from old flows
             return self._handle_ticket_flow(
                 user_message, user_id, session_id, student_profile, entities, {})
         elif intent == "TICKET_STATUS":
             return self._handle_ticket_status(user_message, user_id, session_id, student_profile, entities)
+        elif intent == "CALENDAR":
+            return self._handle_calendar(user_message, user_id, session_id, student_profile, entities)
+        elif intent == "PROFILE_SUMMARY":
+            return self._handle_profile_summary(user_message, user_id, session_id, student_profile)
         elif intent == "GREETING":
             return self._handle_greeting(user_message, user_id, session_id, student_profile)
         else:
@@ -368,7 +545,9 @@ Return ONLY valid JSON:
                 "I'm not sure I understand. Could you clarify?\n\n"
                 "• **Ask a question** about college policies\n"
                 "• **Send an email** to faculty or contacts\n"
-                "• **Raise a ticket**\n• **Check tickets**",
+                "• **View email history**\n"
+                "• **Raise a ticket**\n• **Check tickets**\n"
+                "• **Calendar events**\n• **My profile**",
                 response_type="clarification_request",
                 session_id=session_id, user_id=user_id,
                 user_message=user_message, intent="UNKNOWN",
@@ -384,8 +563,11 @@ Return ONLY valid JSON:
             r = (f"Hi {name}! 👋 Here's what I can do:\n\n"
                  "📚 **Answer questions** about college policies, courses, fees\n"
                  "📧 **Send emails** to faculty or any contact\n"
+                 "📬 **View email history** — see all sent emails\n"
                  "🎫 **Raise tickets** for issues or complaints\n"
-                 "📋 **Check ticket status**\n\nWhat would you like help with?")
+                 "📋 **Check ticket status**\n"
+                 "📅 **Calendar events** — mark important dates\n"
+                 "📊 **Profile summary** — your activity stats\n\nWhat would you like help with?")
         elif any(w in ml for w in ["bye", "goodbye"]):
             r = f"Goodbye {name}! Feel free to come back anytime. 👋"
         elif any(w in ml for w in ["thank", "thanks"]):
@@ -397,6 +579,320 @@ Return ONLY valid JSON:
             r, session_id=session_id, user_id=user_id,
             user_message=message, intent="GREETING", agent="orchestrator",
             student_profile=student_profile)
+
+    # =========================================================================
+    # EMAIL HISTORY HANDLER
+    # =========================================================================
+    def _handle_email_history(self, message, user_id, session_id, student_profile):
+        """Show sent email history from the canonical email_requests table."""
+        try:
+            # Extract "last N" from message if specified
+            limit = 10  # default
+            limit_match = re.search(r'\b(?:last|recent|top)\s+(\d+)\b', message, re.IGNORECASE)
+            if limit_match:
+                limit = min(int(limit_match.group(1)), 50)  # cap at 50
+
+            history = self.faculty_db.get_student_email_history(user_id)
+
+            if history:
+                displayed = history[:limit]
+                lines = []
+                for i, h in enumerate(displayed, 1):
+                    name = h.get('faculty_name', 'Unknown')
+                    subj = h.get('subject', 'No subject')
+                    status = h.get('status', 'Unknown')
+                    ts = h.get('timestamp', '')
+                    lines.append(f"{i}. **To: {name}** — \"{subj}\" [{status}] ({ts})")
+
+                text = f"📬 **Your Email History** (showing {len(displayed)} of {len(history)}):\n\n" + "\n".join(lines)
+                if len(history) > limit:
+                    text += f"\n\n📋 ...and {len(history) - limit} more. Say **\"show last {limit + 10} emails\"** to see more, or check the **Email History** page."
+            else:
+                text = "📭 You haven't sent any emails yet.\n\nYou can email faculty via **Send Email** in chat, or from the **Contact Faculty** page."
+
+            return self._make_response(
+                text, session_id=session_id, user_id=user_id,
+                user_message=message, intent="EMAIL_HISTORY", agent="orchestrator",
+                confidence=1.0, student_profile=student_profile)
+        except Exception as e:
+            print(f"[EMAIL_HISTORY] Error: {e}")
+            return self._make_response(
+                "⚠️ Sorry, I couldn't retrieve your email history right now. Please try again or check the **Email History** page.",
+                session_id=session_id, user_id=user_id,
+                user_message=message, intent="EMAIL_HISTORY",
+                student_profile=student_profile)
+
+    # =========================================================================
+    # PROFILE SUMMARY HANDLER
+    # =========================================================================
+    def _handle_profile_summary(self, message, user_id, session_id, student_profile):
+        """Show user profile stats and recent activity."""
+        try:
+            from services.stats_service import StatsService
+            from services.activity_service import ActivityService
+
+            stats = StatsService.get_student_stats(user_id)
+            recent = ActivityService.get_recent_activity(user_id, limit=5)
+
+            name = "there"
+            if student_profile and isinstance(student_profile, dict):
+                name = student_profile.get("full_name", student_profile.get("name", "there"))
+
+            lines = [
+                f"📊 **Profile Summary for {name}**\n",
+                f"📧 **Emails:** {stats.get('emails_total', 0)} total ({stats.get('emails_today', 0)} today)",
+                f"🎫 **Tickets:** {stats.get('tickets_total', 0)} total ({stats.get('tickets_open', 0)} open, {stats.get('tickets_closed', 0)} resolved)",
+            ]
+
+            if stats.get('last_activity'):
+                lines.append(f"⏰ **Last Activity:** {stats['last_activity']}")
+
+            if recent:
+                lines.append("\n📋 **Recent Activity:**")
+                for act in recent[:5]:
+                    desc = act.get('description', act.get('action_description', ''))
+                    ts = act.get('timestamp', act.get('created_at', ''))
+                    action_type = act.get('type', act.get('action_type', ''))
+                    emoji = {"EMAIL_SENT": "📧", "TICKET_CREATED": "🎫", "TICKET_CLOSED": "✅", "LOGIN": "🔑", "CALENDAR_EVENT_CREATED": "📅"}.get(action_type, "•")
+                    lines.append(f"  {emoji} {desc} ({ts})")
+
+            text = "\n".join(lines)
+            return self._make_response(
+                text, session_id=session_id, user_id=user_id,
+                user_message=message, intent="PROFILE_SUMMARY", agent="orchestrator",
+                confidence=1.0, student_profile=student_profile)
+        except Exception as e:
+            print(f"[PROFILE_SUMMARY] Error: {e}")
+            return self._make_response(
+                "⚠️ Sorry, I couldn't retrieve your profile summary right now. Please try again.",
+                session_id=session_id, user_id=user_id,
+                user_message=message, intent="PROFILE_SUMMARY",
+                student_profile=student_profile)
+
+    # =========================================================================
+    # CALENDAR HANDLER
+    # =========================================================================
+    def _handle_calendar(self, message, user_id, session_id, student_profile, entities=None):
+        """Handle calendar event management: add, view, overlap detection."""
+        try:
+            from services.activity_service import ActivityService
+            msg_lower = message.lower().strip()
+            entities = entities or {}
+
+            # Helper: build response with calendar_events in metadata for frontend sync
+            def _calendar_response(text, all_events=None):
+                if all_events is None:
+                    all_events = ActivityService.get_all_events(user_id)
+                resp = self._make_response(
+                    text, session_id=session_id, user_id=user_id,
+                    user_message=message, intent="CALENDAR", agent="orchestrator",
+                    confidence=1.0, student_profile=student_profile)
+                resp["calendar_events"] = all_events
+                return resp
+
+            # Determine sub-action: view or add
+            is_view = re.search(
+                r'\b(show|view|list|upcoming|what|anything|do\s*i|schedule|check|see)\b.*\b(events?|calendar|dates?|schedule|on|marked|important|planned)\b'
+                r'|\b(my|show|view)\s+(schedule|events?|important\s+dates?|marked\s+dates?|calendar)\b'
+                r'|\bwhat.?s\s+(on\s+my\s+)?schedule\b'
+                r'|\bwhat\s+do\s+i\s+have\b',
+                msg_lower
+            )
+
+            if is_view:
+                # View upcoming events
+                events = ActivityService.get_upcoming_events(user_id, limit=10)
+                if events:
+                    lines = ["📅 **Your Upcoming Events:**\n"]
+                    for i, ev in enumerate(events, 1):
+                        title = ev.get("title", "Untitled")
+                        date = ev.get("event_date", "")
+                        time_str = ev.get("event_time", "")
+                        time_part = f" at {time_str}" if time_str else ""
+                        lines.append(f"{i}. **{title}** — {date}{time_part}")
+                    text = "\n".join(lines)
+                else:
+                    text = "📅 You don't have any upcoming events.\n\nSay **\"add exam on March 10\"** to mark an important date!"
+                return _calendar_response(text)
+
+            # --- Add event: extract title and date ---
+            event_title = entities.get("event_title")
+            event_date = entities.get("event_date")
+
+            # Try regex extraction if LLM didn't populate
+            if not event_title or not event_date:
+                # Patterns: "add exam on March 10", "mark event on 28/02/2026",
+                #           "Mark an event on 28/02/2026.I have an appointment..."
+                date_pattern = re.search(
+                    r'(?:add|mark|schedule|set|create)\s+(.+?)\s+(?:on|for|at|date)\s+(.+?)$',
+                    message, re.IGNORECASE)
+                if date_pattern:
+                    if not event_title:
+                        event_title = date_pattern.group(1).strip()
+                    if not event_date:
+                        raw_date = date_pattern.group(2).strip()
+                        # Clean: extract only the date portion, discard trailing description
+                        # Match common date patterns at the start of the captured group
+                        date_extract = re.match(
+                            r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}'
+                            r'|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}'
+                            r'|\w+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*\d{4})?'
+                            r'|\d{1,2}(?:st|nd|rd|th)?\s+\w+(?:\s*,?\s*\d{4})?'
+                            r'|today|tomorrow|next\s+\w+)',
+                            raw_date, re.IGNORECASE)
+                        event_date = date_extract.group(0).strip() if date_extract else raw_date
+                        # Also try to extract event description from rest as title enhancement
+                        rest_after_date = raw_date[len(event_date):].strip()
+                        rest_after_date = re.sub(r'^[\.\,\;\-\s]+', '', rest_after_date)
+                        # If event_title is generic (like 'an event'), use rest as title
+                        if rest_after_date and event_title.lower() in ('an event', 'event', 'a date', 'date'):
+                            event_title = rest_after_date.rstrip('.')
+                else:
+                    # Fallback: try to find date anywhere in the message
+                    date_anywhere = re.search(
+                        r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}'
+                        r'|\d{4}[/\-]\d{1,2}[/\-]\d{1,2})',
+                        message)
+                    if date_anywhere and not event_date:
+                        event_date = date_anywhere.group(0)
+                    # Try to extract title from the rest of the message
+                    if date_anywhere and not event_title:
+                        rest = message[:date_anywhere.start()] + message[date_anywhere.end():]
+                        rest = re.sub(r'\b(mark|add|schedule|create|set|on|for|at|an?|event|date)\b', '', rest, flags=re.IGNORECASE)
+                        rest = rest.strip(' .,;-')
+                        if rest:
+                            event_title = rest
+
+            # If still missing info, ask for clarification
+            if not event_title or not event_date:
+                missing = []
+                if not event_title:
+                    missing.append("event name")
+                if not event_date:
+                    missing.append("date")
+                return self._make_response(
+                    f"📅 I'd love to help you add a calendar event!\n\n"
+                    f"Please provide the **{' and '.join(missing)}**.\n\n"
+                    f"Example: **\"Add exam on March 10\"** or **\"Mark holiday on 2026-03-15\"**",
+                    response_type="clarification_request",
+                    session_id=session_id, user_id=user_id,
+                    user_message=message, intent="CALENDAR", agent="orchestrator",
+                    student_profile=student_profile)
+
+            # Parse date string
+            parsed_date = self._parse_event_date(event_date)
+            if not parsed_date:
+                return self._make_response(
+                    f"⚠️ I couldn't understand the date \"{event_date}\".\n\n"
+                    "Please use a format like **\"March 10\"**, **\"2026-03-10\"**, **\"10/03/2026\"**, or **\"tomorrow\"**.",
+                    response_type="clarification_request",
+                    session_id=session_id, user_id=user_id,
+                    user_message=message, intent="CALENDAR", agent="orchestrator",
+                    student_profile=student_profile)
+
+            # Check for overlapping events
+            existing = ActivityService.get_events_on_date(user_id, parsed_date)
+            overlap_warning = ""
+            if existing:
+                overlap_lines = [f"• **{e.get('title', 'Untitled')}**" for e in existing]
+                overlap_warning = (
+                    f"\n\n⚠️ **Note:** You already have {len(existing)} event(s) on this date:\n"
+                    + "\n".join(overlap_lines)
+                    + "\nThe event will still be added alongside existing ones."
+                )
+
+            # Add the event
+            event_id = ActivityService.add_calendar_event(
+                student_email=user_id,
+                title=event_title,
+                event_date=parsed_date
+            )
+
+            if event_id:
+                text = f"✅ **Event Added!**\n\n📅 **{event_title}** on **{parsed_date}**{overlap_warning}"
+                # Log activity
+                try:
+                    ActivityService.log_activity(
+                        user_id, "CALENDAR_EVENT_CREATED",
+                        f"Added calendar event: {event_title} on {parsed_date}")
+                except Exception:
+                    pass
+            else:
+                text = "⚠️ Sorry, I couldn't save the event. Please try again."
+
+            return _calendar_response(text)
+        except Exception as e:
+            print(f"[CALENDAR] Error: {e}")
+            traceback.print_exc()
+            return self._make_response(
+                "⚠️ Sorry, I couldn't process your calendar request. Please try again.",
+                session_id=session_id, user_id=user_id,
+                user_message=message, intent="CALENDAR",
+                student_profile=student_profile)
+
+    def _parse_event_date(self, date_str: str) -> Optional[str]:
+        """Parse various date formats into YYYY-MM-DD string.
+        Handles messy input by extracting date patterns first."""
+        from datetime import timedelta
+        import calendar as cal_module
+
+        date_str = date_str.strip()
+        # Pre-clean: remove trailing non-date text (e.g. 'period', descriptions)
+        # Try to extract a date-looking portion from the start
+        date_extract = re.match(
+            r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}'
+            r'|\d{4}[/\-]\d{1,2}[/\-]\d{1,2}'
+            r'|\w+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*\d{4})?'
+            r'|\d{1,2}(?:st|nd|rd|th)?\s+\w+(?:\s*,?\s*\d{4})?'
+            r'|today|tomorrow|next\s+\w+)',
+            date_str, re.IGNORECASE)
+        if date_extract:
+            date_str = date_extract.group(0).strip()
+
+        date_str = date_str.lower().rstrip('.')
+
+        # Relative dates
+        today = datetime.now()
+        if date_str in ('today',):
+            return today.strftime('%Y-%m-%d')
+        if date_str in ('tomorrow',):
+            return (today + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # Try standard formats (including DD/MM/YYYY which is common in India)
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%d.%m.%Y'):
+            try:
+                return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+
+        # Try "Month Day" or "Day Month" patterns
+        month_names = {name.lower(): num for num, name in enumerate(cal_module.month_name) if num}
+        month_abbr = {name.lower(): num for num, name in enumerate(cal_module.month_abbr) if num}
+        all_months = {**month_names, **month_abbr}
+
+        # "March 10" or "march 10th"
+        m = re.match(r'(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:,?\s*(\d{4}))?', date_str)
+        if m and m.group(1) in all_months:
+            month = all_months[m.group(1)]
+            day = int(m.group(2))
+            year = int(m.group(3)) if m.group(3) else today.year
+            try:
+                return datetime(year, month, day).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+
+        # "10 March" or "10th march"
+        m = re.match(r'(\d{1,2})(?:st|nd|rd|th)?\s+(\w+)\s*(?:,?\s*(\d{4}))?', date_str)
+        if m and m.group(2) in all_months:
+            month = all_months[m.group(2)]
+            day = int(m.group(1))
+            year = int(m.group(3)) if m.group(3) else today.year
+            try:
+                return datetime(year, month, day).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+
+        return None  # Could not parse
 
     # =========================================================================
     # FAQ HANDLER
@@ -474,36 +970,8 @@ Return ONLY valid JSON:
                 except Exception as e:
                     print(f"[WARN] Faculty query failed, falling through to FAQ: {e}")
 
-            # --- Email history queries ---
-            email_history_keywords = ['email history', 'emails sent', 'emails i sent', 'email log',
-                                       'sent emails', 'what emails', 'which emails', 'show emails',
-                                       'my emails', 'email records', 'how many emails sent',
-                                       'emails have i sent', 'list emails', 'previous emails']
-            is_email_history = any(kw in msg_lower for kw in email_history_keywords)
-
-            if is_email_history:
-                try:
-                    history = self.faculty_db.get_student_email_history(user_id)
-                    if history:
-                        lines = []
-                        for h in history[:10]:
-                            name = h.get('faculty_name', 'Unknown')
-                            subj = h.get('subject', 'No subject')
-                            status = h.get('status', 'Unknown')
-                            ts = h.get('timestamp', '')
-                            lines.append(f"• **To: {name}** — \"{subj}\" [{status}] ({ts})")
-                        text = f"📬 **Your Email History** ({len(history)} total):\n\n" + "\n".join(lines)
-                        if len(history) > 10:
-                            text += f"\n\n...and {len(history) - 10} more. Check the **Email History** page for the full list."
-                    else:
-                        text = "📭 You haven't sent any emails yet. You can email faculty from **Contact Faculty** or use **Send Email** in chat."
-
-                    return self._make_response(
-                        text, session_id=session_id, user_id=user_id,
-                        user_message=message, intent="FAQ", agent="faq_agent",
-                        confidence=0.9, student_profile=student_profile)
-                except Exception as e:
-                    print(f"[WARN] Email history query failed, falling through to FAQ: {e}")
+            # Note: Email history is now handled by _handle_email_history() via EMAIL_HISTORY intent.
+            # The old keyword-based detection here was unreachable (LLM classified these as EMAIL).
 
             # --- Email quota queries ---
             quota_keywords = ['emails left', 'email left', 'email limit', 'email quota',
@@ -584,7 +1052,14 @@ Return ONLY valid JSON:
         for key in ["faculty_name", "email_address", "purpose"]:
             val = entities.get(key)
             if val and not slots.get(key.replace("email_address", "recipient_email")):
+                # Extra validation for email to ensure it's a valid format
+                if key == "email_address" and not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', str(val).strip()):
+                    continue
                 slots[key.replace("email_address", "recipient_email")] = val
+
+        # Validate existing recipient_email slot just in case
+        if slots.get("recipient_email") and not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', str(slots["recipient_email"]).strip()):
+            slots.pop("recipient_email")
 
         # Extract email from message
         email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', message)
@@ -656,18 +1131,14 @@ Return ONLY valid JSON:
 
         # ---------- STEP: COLLECT_RECIPIENT ----------
         if step == "collect_recipient":
-            # Detect unrelated intents and break out of email flow
-            escape_patterns = [
-                r'\b(raise|create|open|file)\s+(a\s+)?ticket\b',
-                r'\b(check|view|close)\s+ticket\b',
-                r'\bticket\s+status\b',
-                r'\b(what|how|when|where|tell me about|explain)\b.*\b(attendance|placement|fee|hostel|library|admission)\b'
-            ]
-            for pattern in escape_patterns:
-                if re.search(pattern, message, re.IGNORECASE):
-                    clear_flow(session_id, "active")
-                    return self.process_message(message, user_id, session_id,
-                                                student_profile=student_profile)
+            # Intent re-check: if user typed a command instead of a name, escape
+            pre_intent = self._pre_classify_intent(message)
+            if pre_intent and pre_intent != "EMAIL":
+                print(f"[FLOW-RECHECK] collect_recipient got '{pre_intent}' intent — escaping email flow")
+                clear_flow(session_id, "active")
+                return self._route_to_handler(
+                    pre_intent, 1.0, {}, message, user_id, session_id,
+                    student_profile)
 
             if email_match:
                 slots["recipient_email"] = email_match.group()
@@ -732,6 +1203,14 @@ Return ONLY valid JSON:
 
         # ---------- STEP: COLLECT_PURPOSE ----------
         if step == "collect_purpose":
+            # Intent re-check: if user typed a command instead of purpose text, escape
+            pre_intent = self._pre_classify_intent(message)
+            if pre_intent and pre_intent != "EMAIL":
+                print(f"[FLOW-RECHECK] collect_purpose got '{pre_intent}' intent — escaping email flow")
+                clear_flow(session_id, "active")
+                return self._route_to_handler(
+                    pre_intent, 1.0, {}, message, user_id, session_id,
+                    student_profile)
             slots["purpose"] = message.strip()
             return self._generate_email_preview(
                 message, user_id, session_id, student_profile, slots, entities)
@@ -758,7 +1237,7 @@ Return ONLY valid JSON:
                     student_profile=student_profile)
 
         clear_flow(session_id, "active")
-        return self.process_message(user_message, user_id, session_id,
+        return self.process_message(message, user_id, session_id,
                                     student_profile=student_profile)
 
     def _search_faculty(self, name, message, user_id, session_id,
@@ -973,7 +1452,7 @@ Return ONLY valid JSON:
                     student_profile=student_profile)
 
         clear_flow(session_id, "active")
-        return self.process_message(user_message, user_id, session_id,
+        return self.process_message(message, user_id, session_id,
                                     student_profile=student_profile)
 
     def _generate_ticket_preview(self, message, user_id, session_id,
