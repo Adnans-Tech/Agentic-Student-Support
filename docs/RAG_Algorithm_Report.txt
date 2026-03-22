@@ -1,0 +1,708 @@
+================================================================================
+         RAG (RETRIEVAL-AUGMENTED GENERATION) ALGORITHM REPORT
+                  ACE Student Support System
+================================================================================
+   Project  : Agentic Student Support — ACE Engineering College
+   Date     : February 2026
+   Version  : 2.0
+================================================================================
+
+
+TABLE OF CONTENTS
+-----------------
+  1. Executive Summary
+  2. What is RAG?
+  3. Why RAG for Student Support?
+  4. System Architecture Overview
+  5. RAG Pipeline — Step-by-Step
+     5.1  Knowledge Base Preparation
+     5.2  Document Chunking
+     5.3  Embedding Generation
+     5.4  Vector Store Indexing (FAISS)
+     5.5  Query Processing & Enhancement
+     5.6  Semantic Retrieval
+     5.7  Context Assembly
+     5.8  LLM-Augmented Generation
+     5.9  Post-Processing & Confidence Scoring
+  6. Multi-Layer Memory Architecture
+     6.1  FAISS Vector Store (Knowledge RAG)
+     6.2  ChromaDB Chat Memory (Conversation Persistence)
+     6.3  ChromaDB History RAG (Action History)
+  7. Optimization Techniques
+  8. Technical Specifications
+  9. Comparison with Traditional Approaches
+  10. Diagrams Reference
+  11. References & Technologies
+
+
+================================================================================
+1. EXECUTIVE SUMMARY
+================================================================================
+
+The ACE Student Support System implements a production-grade Retrieval-Augmented
+Generation (RAG) architecture to answer student queries about college policies,
+academics, placements, fees, and administrative procedures. Rather than relying
+solely on a Large Language Model (LLM) — which may hallucinate or provide
+outdated information — the system retrieves relevant factual data from a curated
+knowledge base before generating responses.
+
+Key highlights:
+  - Embedding Model  : sentence-transformers/all-MiniLM-L6-v2 (384-dim vectors)
+  - Vector Database   : FAISS (Facebook AI Similarity Search)
+  - LLM               : Groq LLaMA 3.1 8B Instant (via Groq Cloud API)
+  - Knowledge Source   : college_rules.txt (289 lines, 18 sections)
+  - Memory Systems     : ChromaDB (conversation history + user action history)
+  - Chunking Strategy  : RecursiveCharacterTextSplitter (500 chars, 50 overlap)
+  - Retrieval Method   : Cosine Similarity, top-k=5
+  - Response Caching   : TTL-based in-memory cache (5 minutes, 50 entries max)
+
+
+================================================================================
+2. WHAT IS RAG?
+================================================================================
+
+Retrieval-Augmented Generation (RAG) is a hybrid AI architecture that combines
+two distinct capabilities:
+
+  1. RETRIEVAL: Finding relevant information from a knowledge base using
+     semantic (meaning-based) search rather than keyword matching.
+
+  2. GENERATION: Using a Large Language Model (LLM) to synthesize the
+     retrieved information into a natural, conversational response.
+
+The core idea is simple:
+  - Instead of asking an LLM to answer from its training data (which may be
+    outdated or incorrect), we first RETRIEVE the most relevant facts from
+    our own trusted data source.
+  - We then pass these facts as CONTEXT to the LLM, instructing it to base
+    its answer ONLY on the provided information.
+
+This approach solves three critical problems:
+  (a) Hallucination Prevention : The LLM is grounded in verified data.
+  (b) Knowledge Currency       : We can update the knowledge base without
+                                  retraining the model.
+  (c) Domain Specificity        : The system knows institution-specific
+                                  information that no general LLM would have.
+
+The RAG paradigm was introduced by Lewis et al. (2020) in the paper
+"Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" and has
+since become the industry standard for building knowledge-grounded AI systems.
+
+
+================================================================================
+3. WHY RAG FOR STUDENT SUPPORT?
+================================================================================
+
+Traditional chatbots fail in the educational support domain because:
+
+  Problem 1: Static Rule-Based Systems
+  - Cannot understand paraphrased questions
+  - Require exact keyword matches
+  - Break when students ask questions in unexpected ways
+
+  Problem 2: Pure LLM Systems
+  - Hallucinate college-specific data (fees, timings, policies)
+  - Cannot be updated without expensive fine-tuning
+  - May provide information from other institutions
+
+  Problem 3: Simple FAQ Matching
+  - Limited to pre-defined question-answer pairs
+  - No semantic understanding
+  - Cannot handle follow-up or comparative queries
+
+RAG addresses ALL of these:
+  + Understands meaning, not just keywords (semantic search)
+  + Grounded in verified institutional data (no hallucination)
+  + Easily updated by editing a single text file (college_rules.txt)
+  + Handles comparative queries ("which department has most seats?")
+  + Supports multi-turn conversations with context awareness
+
+
+================================================================================
+4. SYSTEM ARCHITECTURE OVERVIEW
+================================================================================
+
+The ACE Support System uses a multi-agent architecture where RAG is the
+foundation of the FAQ Agent, one of four specialized agents managed by a
+central Orchestrator:
+
+  ┌─────────────────────────────────────────────────────────┐
+  │                   REACT FRONTEND                        │
+  │              (Chat Support Interface)                   │
+  └──────────────────────┬──────────────────────────────────┘
+                         │ REST API (HTTP/JSON)
+  ┌──────────────────────▼──────────────────────────────────┐
+  │                  FLASK BACKEND                          │
+  │              (app.py — API Layer)                       │
+  └──────────────────────┬──────────────────────────────────┘
+                         │
+  ┌──────────────────────▼──────────────────────────────────┐
+  │              ORCHESTRATOR AGENT                         │
+  │      (Intent Classification → Agent Routing)            │
+  │                                                         │
+  │   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+  │   │ FAQ Agent │ │  Email   │ │  Ticket  │ │ Faculty  │ │
+  │   │  (RAG)   │ │  Agent   │ │  Agent   │ │    DB    │ │
+  │   └─────┬────┘ └──────────┘ └──────────┘ └──────────┘ │
+  └─────────┼───────────────────────────────────────────────┘
+            │
+  ┌─────────▼───────────────────────────────────────────────┐
+  │                   RAG ENGINE                             │
+  │                                                          │
+  │  ┌──────────┐  ┌──────────┐  ┌───────────────────────┐  │
+  │  │ FAISS    │  │ Embedding│  │ Knowledge Base        │  │
+  │  │ Vector   │←─│ Model    │←─│ (college_rules.txt)   │  │
+  │  │ Store    │  │ MiniLM   │  │ 289 lines, 18 topics  │  │
+  │  └─────┬────┘  └──────────┘  └───────────────────────┘  │
+  │        │                                                  │
+  │  ┌─────▼────┐  ┌──────────┐  ┌───────────────────────┐  │
+  │  │ Retrieved│→ │ Context  │→ │ Groq LLaMA 3.1 8B     │  │
+  │  │ Chunks   │  │ Assembly │  │ (Cloud LLM API)       │  │
+  │  └──────────┘  └──────────┘  └───────────────────────┘  │
+  └──────────────────────────────────────────────────────────┘
+
+  [Refer to: docs/RAG_System_Architecture.png for the detailed diagram]
+
+
+================================================================================
+5. RAG PIPELINE — STEP-BY-STEP
+================================================================================
+
+The RAG pipeline in this system consists of 9 sequential stages. Each stage
+is implemented in specific source files as documented below.
+
+
+------------------------------------------------------------------------
+5.1  KNOWLEDGE BASE PREPARATION
+------------------------------------------------------------------------
+
+Source File : data/college_rules.txt
+Size        : 289 lines, 10,493 bytes
+Sections    : 18 topic areas
+
+The knowledge base is a curated, structured text file containing verified
+institutional information organized into clearly demarcated sections:
+
+  Section  1  : Institutional Overview (founding, accreditation, campus)
+  Section  2  : Academic Governance & Examination System (CBCS, grading)
+  Section  3  : Supplementary & Backlog Examination Rules
+  Section  4  : Promotion, Credits & Duration
+  Section  5  : Admissions Overview (quotas, programs, intake)
+  Section  6  : Internship Policy
+  Section  7  : Final-Year Project Regulations
+  Section  8  : Placements & Career Support
+  Section  9  : Scholarships & Financial Aid
+  Section 10  : Certificates & Student Services
+  Section 11  : Fee Policies
+  Section 12  : Library Facilities & Access
+  Section 13  : Hostel & Transport
+  Section 14  : Student Welfare & Grievance Redressal
+  Section 15  : Discipline & Malpractice Consequences
+  Section 16  : Student Life & Campus Culture
+  Section 17  : Higher Studies & Alumni Support
+  Section 18  : College Timings
+
+Key Design Decision:
+  The knowledge base uses a FLAT TEXT FORMAT rather than a database because:
+  - It is easily editable by non-technical staff
+  - It preserves contextual relationships between sentences
+  - The text splitter handles section boundaries automatically
+  - It avoids the complexity of schema design for diverse data types
+
+
+------------------------------------------------------------------------
+5.2  DOCUMENT CHUNKING
+------------------------------------------------------------------------
+
+Source File : agents/vector_store.py (VectorStoreManager.load_and_split_documents)
+Algorithm   : RecursiveCharacterTextSplitter (LangChain)
+
+The knowledge base is split into overlapping chunks for optimal retrieval:
+
+  Parameters:
+    chunk_size    = 500 characters
+    chunk_overlap = 50 characters
+    separators    = ["\n\n", "\n", " ", ""]
+
+  How RecursiveCharacterTextSplitter works:
+    1. First tries to split on "\n\n" (paragraph boundaries)
+    2. If chunks are still too large, splits on "\n" (line boundaries)
+    3. If still too large, splits on " " (word boundaries)
+    4. Last resort: splits on "" (character boundaries)
+
+  Why 500-character chunks?
+    - Small enough to maintain topical coherence within each chunk
+    - Large enough to preserve meaningful context
+    - Empirically optimal for the sentence-transformers embedding model
+    - Balances retrieval precision with recall
+
+  Why 50-character overlap?
+    - Prevents information loss at chunk boundaries
+    - Ensures that sentences spanning two chunks are retrievable
+    - 10% overlap ratio is an industry best practice
+
+  Example — how a section is chunked:
+    Original text (650 chars):
+      "Section 8: PLACEMENTS & CAREER SUPPORT
+       Placement Policy: Placement Fee: Applicable...
+       Highest Package: INR 49 LPA (Amazon)
+       Average Package: INR 7-8 LPA (ongoing)"
+
+    Chunk 1 (500 chars): "Section 8: PLACEMENTS...Offer Rejection: Permitted"
+    Chunk 2 (500 chars): "Offer Rejection: Permitted...Average Package: INR 7-8 LPA"
+                          ↑ 50-char overlap ensures continuity
+
+
+------------------------------------------------------------------------
+5.3  EMBEDDING GENERATION
+------------------------------------------------------------------------
+
+Source File : agents/vector_store.py (VectorStoreManager._ensure_initialized)
+Model       : sentence-transformers/all-MiniLM-L6-v2 (HuggingFace)
+
+Each text chunk is converted into a dense numerical vector (embedding) that
+captures its semantic meaning. This enables "meaning-based" search rather
+than simple keyword matching.
+
+  Model Specifications:
+    Name           : all-MiniLM-L6-v2
+    Architecture   : MiniLM (distilled from BERT)
+    Parameters     : 22.7 million
+    Vector Size    : 384 dimensions
+    Max Input      : 256 word pieces (tokens)
+    Training Data  : 1 billion+ sentence pairs
+    Similarity     : Cosine similarity optimized
+
+  How embedding works:
+    Input:  "The library is open from 9:30 AM to 4:30 PM"
+    Output: [0.0234, -0.1452, 0.0891, ... ] (384 floating-point numbers)
+
+  Key property — SEMANTIC SIMILARITY:
+    "What time does the library close?"  →  vector_A
+    "Library working hours"              →  vector_B
+    "When is the library open?"          →  vector_C
+
+    cosine_similarity(vector_A, vector_B) ≈ 0.87  (HIGH — semantically similar)
+    cosine_similarity(vector_A, vector_C) ≈ 0.91  (HIGH — semantically similar)
+
+    This means students can ask questions in ANY phrasing and the system
+    will still find the correct information.
+
+  Why this model was chosen:
+    - Lightweight (22.7M params vs BERT's 110M) — fast inference
+    - High quality embeddings for English text
+    - Runs locally without GPU (CPU-friendly)
+    - Singleton pattern prevents loading the model multiple times
+    - Well-suited for domain-specific text retrieval
+
+
+------------------------------------------------------------------------
+5.4  VECTOR STORE INDEXING (FAISS)
+------------------------------------------------------------------------
+
+Source File : agents/vector_store.py (VectorStoreManager.initialize_vectorstore)
+Library     : FAISS (Facebook AI Similarity Search)
+Storage     : data/vectordb/index.faiss + data/vectordb/index.pkl
+
+FAISS is an open-source library by Meta AI for efficient similarity search
+over dense vectors. In this system, all chunk embeddings are indexed in FAISS
+for ultra-fast retrieval.
+
+  How FAISS indexing works:
+    1. All document chunks are embedded (see 5.3)
+    2. Embeddings are stored in a FAISS flat index (IndexFlatL2)
+    3. The index is persisted to disk as index.faiss and index.pkl
+    4. On subsequent startups, the index is loaded from disk (no re-embedding)
+
+  Index properties:
+    Type            : Flat (exact search — no approximation)
+    Distance Metric : L2 (Euclidean), converted to cosine similarity
+    Persistence     : Local disk (data/vectordb/)
+    Load Strategy   : Lazy initialization — loaded on first query, not at startup
+
+  Why FAISS over alternatives (Pinecone, Weaviate, Milvus)?
+    - Zero cost (no cloud service fees)
+    - Zero latency (local, in-process search)
+    - No network dependency (works offline)
+    - Sufficient for the knowledge base size (~50 chunks)
+    - Persistent storage avoids re-indexing on every restart
+
+
+------------------------------------------------------------------------
+5.5  QUERY PROCESSING & ENHANCEMENT
+------------------------------------------------------------------------
+
+Source File : agents/faq_agent.py (expand_query_with_synonyms, _check_cache)
+
+Before retrieval, the user's query undergoes two enhancement stages:
+
+  Stage A — TTL CACHE CHECK:
+    - A simple in-memory cache (dictionary) stores recent query → response pairs
+    - Cache TTL: 300 seconds (5 minutes)
+    - Cache size: Maximum 50 entries (LRU eviction)
+    - If a cache hit is found, the response is returned immediately
+    - This prevents redundant LLM calls for repeated questions
+
+  Stage B — SYNONYM EXPANSION:
+    The query is enriched with domain-specific synonyms to improve retrieval:
+
+    Synonym Map:
+      "salary"     → ["package", "compensation", "ctc", "offer"]
+      "package"    → ["salary", "compensation", "ctc"]
+      "capacity"   → ["seats", "intake"]
+      "department" → ["branch", "program", "course"]
+      "highest"    → ["maximum", "max", "top", "best"]
+      "lowest"     → ["minimum", "min", "least"]
+
+    Example:
+      Original query : "What is the highest salary?"
+      Expanded query : "What is the highest salary? package compensation ctc"
+
+    This ensures retrieval matches even when the knowledge base uses different
+    terminology than the student's query (e.g., "packages" vs "salary").
+
+
+------------------------------------------------------------------------
+5.6  SEMANTIC RETRIEVAL
+------------------------------------------------------------------------
+
+Source File : agents/faq_agent.py (FAQAgent.process — retrieval section)
+Algorithm   : FAISS cosine similarity search
+
+The enhanced query is embedded using the same model (all-MiniLM-L6-v2) and
+searched against the FAISS index:
+
+  Retrieval Parameters:
+    Default k       : 5 (top 5 most similar chunks)
+    Course queries  : k = 7 (broader retrieval for comprehensive answers)
+    Placement       : k = 5
+    Search type     : "similarity" (cosine similarity)
+
+  How retrieval works:
+    1. Query is converted to a 384-dim vector
+    2. FAISS computes cosine similarity against ALL chunk vectors
+    3. Top-k chunks with highest similarity scores are returned
+    4. Chunks are formatted into a context string (separated by "---")
+
+  Adaptive Retrieval:
+    The system dynamically adjusts retrieval depth based on query type:
+    - Course/department queries use k=7 to capture all 9 B.Tech programs
+    - General queries use k=5 for focused, relevant results
+    - If insufficient context is found (<50 chars), a fallback message is used
+
+
+------------------------------------------------------------------------
+5.7  CONTEXT ASSEMBLY
+------------------------------------------------------------------------
+
+Source File : agents/faq_agent.py (FAQAgent.process — context assembly)
+
+Before sending to the LLM, the system assembles a rich context from
+multiple sources:
+
+  Context Components:
+    1. RETRIEVED CHUNKS (from FAISS) — the primary factual data
+    2. STUDENT PROFILE (from SQLite) — personalized context
+       - Only injected for personal queries (tickets, faculty contact)
+       - Excluded for general college info queries to prevent confusion
+    3. CONVERSATION HISTORY (from ChromaDB) — multi-turn context
+       - Only injected when user explicitly asks about past interactions
+       - Prevents history from polluting factual answers
+
+  Smart Context Filtering:
+    The system detects query intent and selectively includes/excludes context:
+    - College info queries → NO student profile (prevents section names
+      like "CSM-B" from being confused with course names)
+    - Personal queries     → Student profile included
+    - History queries      → Conversation history included
+    - Default queries      → Only retrieved chunks
+
+
+------------------------------------------------------------------------
+5.8  LLM-AUGMENTED GENERATION
+------------------------------------------------------------------------
+
+Source File : agents/faq_agent.py (FAQAgent.__init__ template + process)
+LLM         : Groq LLaMA 3.1 8B Instant (via Groq Cloud API)
+Framework   : LangChain ChatPromptTemplate
+
+The assembled context is passed to the LLM with a carefully engineered prompt:
+
+  LLM Configuration:
+    Model        : llama-3.1-8b-instant
+    Temperature  : 0.1 (near-deterministic for factual accuracy)
+    Max Tokens   : 500
+    API Provider : Groq (ultra-fast inference via specialized hardware)
+
+  Prompt Engineering Strategy:
+    The prompt template enforces strict rules:
+    1. USE NATURAL LANGUAGE — respond conversationally like a counselor
+    2. INCLUDE ALL ITEMS — never truncate lists (all 9 courses must appear)
+    3. NO DATABASE TERMINOLOGY — never say "database shows" or "data found"
+    4. GROUNDED RESPONSES — only use information from retrieved context
+    5. FALLBACK — if info not found, direct users to phone: 091333 08533
+
+  This prompt design ensures:
+    - Students receive helpful, natural responses (not robotic answers)
+    - Responses are factually correct (grounded in retrieved data)
+    - No hallucination (the LLM cannot add information not in context)
+    - Complete answers (all items in lists are included)
+
+
+------------------------------------------------------------------------
+5.9  POST-PROCESSING & CONFIDENCE SCORING
+------------------------------------------------------------------------
+
+Source File : agents/faq_agent.py (multiple functions)
+
+After LLM generation, the response undergoes three post-processing steps:
+
+  Step A — COMPARATIVE QUERY HANDLING (handle_comparative_query):
+    Detects comparative queries ("which department has the most seats?")
+    and extracts structured data from the response to formulate precise
+    answers:
+    - Parses capacity numbers using regex
+    - Identifies max/min values
+    - Returns formatted comparison sentences
+
+  Step B — NATURAL LANGUAGE FORMATTING (format_to_natural_language):
+    Converts any remaining structured data into flowing sentences:
+    - Placement data → "The highest package is INR 49 LPA from Amazon"
+    - Department lists → "ACE Engineering College offers 7 departments:..."
+    - Capacity data → natural language with proper formatting
+
+  Step C — CONFIDENCE SCORING (_estimate_confidence):
+    Calculates a 0.0-1.0 confidence score based on:
+
+    Factor 1: Number of retrieved documents
+      - 3+ documents → +0.20
+      - 1-2 documents → +0.10
+
+    Factor 2: Context richness
+      - >200 characters → +0.15
+      - >100 characters → +0.10
+
+    Factor 3: Response quality
+      - No "not available" phrases → +0.15
+      - Contains uncertainty phrases → -0.20
+
+    Base score: 0.50
+    Final range: capped between 0.30 and 0.95
+
+    Confidence behavior:
+      - Score >= 0.6 → Direct response (cached for future use)
+      - Score < 0.6  → Low-confidence warning + suggestion to rephrase
+      - After 2 failed clarifications → Escalation to ticket system
+
+
+================================================================================
+6. MULTI-LAYER MEMORY ARCHITECTURE
+================================================================================
+
+The system uses THREE separate vector/database stores for different purposes:
+
+
+------------------------------------------------------------------------
+6.1  FAISS VECTOR STORE (Knowledge RAG)
+------------------------------------------------------------------------
+
+Source   : agents/vector_store.py
+Storage  : data/vectordb/ (index.faiss + index.pkl)
+Purpose  : Semantic search over college rules and policies
+Backend  : FAISS (Meta AI)
+Model    : all-MiniLM-L6-v2 (384-dim embeddings)
+Pattern  : Singleton (get_vector_store_manager) — prevents duplicate loading
+
+This is the PRIMARY RAG store used by the FAQ Agent to answer knowledge
+queries about college rules, fees, placements, and policies.
+
+
+------------------------------------------------------------------------
+6.2  CHROMADB CHAT MEMORY (Conversation Persistence)
+------------------------------------------------------------------------
+
+Source   : agents/chat_memory.py
+Storage  : data/chat_memory_db/ (ChromaDB persistent directory)
+Purpose  : Store and retrieve conversation history per user/session
+Backend  : ChromaDB (with built-in embedding function)
+Isolation: Multi-tenant — each user's conversations are isolated via
+           user_id metadata filtering
+
+Features:
+  - Save messages with metadata (intent, selected_agent, timestamp)
+  - Retrieve session history with user isolation
+  - Semantic search across past conversations
+  - Session management (list, delete, clear)
+
+The chat memory enables:
+  - Multi-turn conversations (the system remembers what was discussed)
+  - "What did I ask earlier?" queries
+  - Conversation export functionality
+
+
+------------------------------------------------------------------------
+6.3  CHROMADB HISTORY RAG (Action History)
+------------------------------------------------------------------------
+
+Source   : agents/history_rag_service.py
+Storage  : data/user_history_db/ (ChromaDB persistent directory)
+Purpose  : Index and retrieve user action history (emails, tickets, contacts)
+Backend  : ChromaDB
+Isolation: User-scoped via metadata filtering
+
+This store tracks:
+  - Emails sent (recipient, subject, body, timestamp)
+  - Tickets created (category, description, status)
+  - Faculty contacts (who was contacted, purpose)
+
+It enables queries like:
+  - "Show my email history"
+  - "What tickets have I raised?"
+  - "Who did I contact last week?"
+
+
+================================================================================
+7. OPTIMIZATION TECHNIQUES
+================================================================================
+
+The RAG implementation includes several optimizations for production use:
+
+  1. SINGLETON PATTERN
+     Both VectorStoreManager and ChatMemory use singleton instances to
+     prevent duplicate loading of the HuggingFace model (~400MB).
+     File: agents/vector_store.py (get_vector_store_manager)
+     File: agents/chat_memory.py (get_chat_memory)
+
+  2. LAZY INITIALIZATION
+     The embedding model is loaded only on first use, not at import time.
+     This reduces startup time when the model isn't immediately needed.
+     File: agents/vector_store.py (_ensure_initialized)
+
+  3. TTL RESPONSE CACHE
+     Frequently asked questions are cached in memory with a 5-minute TTL,
+     eliminating redundant embedding + LLM calls.
+     File: agents/faq_agent.py (_check_cache, _store_cache)
+
+  4. THREAD SAFETY (Environment Variables)
+     The system sets OMP_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1, etc. at
+     startup to prevent BLAS libraries from spawning excessive threads.
+     File: app.py (lines 7-12)
+
+  5. SHARED LLM INSTANCE
+     The Groq LLM instance is created once in the Orchestrator and passed
+     to the FAQ Agent, avoiding duplicate API client initialization.
+     File: agents/orchestrator_agent.py (__init__)
+
+  6. PERSISTENT VECTOR STORE
+     FAISS indexes are saved to disk (index.faiss) and loaded on restart,
+     avoiding the cost of re-embedding all documents every time.
+     File: agents/vector_store.py (initialize_vectorstore)
+
+  7. SELECTIVE CONTEXT INJECTION
+     Student profiles and conversation history are only included in the
+     LLM prompt when relevant, reducing token usage and preventing
+     context pollution.
+     File: agents/faq_agent.py (process — context filtering)
+
+
+================================================================================
+8. TECHNICAL SPECIFICATIONS
+================================================================================
+
+  ┌───────────────────────────┬───────────────────────────────────────────┐
+  │ Component                 │ Specification                             │
+  ├───────────────────────────┼───────────────────────────────────────────┤
+  │ Embedding Model           │ sentence-transformers/all-MiniLM-L6-v2   │
+  │ Embedding Dimensions      │ 384                                       │
+  │ Embedding Model Size      │ ~80 MB                                    │
+  │ Vector Store              │ FAISS (IndexFlatL2)                       │
+  │ Vector Store Location     │ data/vectordb/                            │
+  │ LLM Provider              │ Groq Cloud API                            │
+  │ LLM Model                 │ LLaMA 3.1 8B Instant                     │
+  │ LLM Temperature           │ 0.1                                       │
+  │ LLM Max Tokens            │ 500                                       │
+  │ Chunk Size                │ 500 characters                            │
+  │ Chunk Overlap             │ 50 characters                             │
+  │ Retrieval Top-k           │ 5 (default), 7 (course queries)           │
+  │ Cache TTL                 │ 300 seconds (5 minutes)                   │
+  │ Cache Max Size            │ 50 entries                                │
+  │ Knowledge Base            │ college_rules.txt (289 lines)             │
+  │ Conversation DB           │ ChromaDB (data/chat_memory_db/)           │
+  │ History DB                │ ChromaDB (data/user_history_db/)          │
+  │ Framework                 │ LangChain (orchestration)                 │
+  │ Backend                   │ Flask (Python)                            │
+  │ Frontend                  │ React + Vite                              │
+  │ Text Splitter             │ RecursiveCharacterTextSplitter            │
+  │ Confidence Range          │ 0.30 — 0.95                               │
+  │ Low Confidence Threshold  │ 0.60                                      │
+  │ Escalation Trigger        │ 2 failed clarifications                  │
+  └───────────────────────────┴───────────────────────────────────────────┘
+
+
+================================================================================
+9. COMPARISON WITH TRADITIONAL APPROACHES
+================================================================================
+
+  ┌───────────────────┬────────────┬────────────┬───────────┬──────────────┐
+  │ Feature           │ Keyword    │ Pure LLM   │ Fine-     │ RAG          │
+  │                   │ Search     │ (ChatGPT)  │ Tuning    │ (This System)│
+  ├───────────────────┼────────────┼────────────┼───────────┼──────────────┤
+  │ Semantic Search   │ No         │ N/A        │ N/A       │ Yes          │
+  │ Hallucination     │ None       │ High       │ Medium    │ Very Low     │
+  │ Update Cost       │ Low        │ N/A        │ High      │ Very Low     │
+  │ Domain Accuracy   │ Medium     │ Low        │ High      │ High         │
+  │ Paraphrase Handle │ No         │ Yes        │ Yes       │ Yes          │
+  │ Comparative Query │ No         │ Partial    │ Yes       │ Yes          │
+  │ Conversation Ctx  │ No         │ Yes        │ Yes       │ Yes          │
+  │ Cost              │ Free       │ High       │ Very High │ Low          │
+  │ Setup Complexity  │ Low        │ Low        │ High      │ Medium       │
+  │ Multi-turn        │ No         │ Yes        │ Yes       │ Yes          │
+  └───────────────────┴────────────┴────────────┴───────────┴──────────────┘
+
+
+================================================================================
+10. DIAGRAMS REFERENCE
+================================================================================
+
+The following diagrams accompany this report:
+
+  1. RAG_System_Architecture.png
+     - Multi-layer architecture view showing all system components
+     - Includes: Frontend, Orchestrator, Agent routing, RAG engine details,
+       memory systems, and database layer
+     - Location: docs/RAG_System_Architecture.png
+
+  2. RAG Pipeline Flow (Text-based — included in Section 4 above)
+     - Step-by-step flow from student query to final response
+     - Covers all 9 pipeline stages with data flow arrows
+
+
+================================================================================
+11. REFERENCES & TECHNOLOGIES
+================================================================================
+
+  Papers:
+    [1] Lewis, P. et al. (2020). "Retrieval-Augmented Generation for
+        Knowledge-Intensive NLP Tasks." NeurIPS 2020.
+    [2] Johnson, J. et al. (2019). "Billion-scale similarity search with
+        GPUs." IEEE Transactions on Big Data.
+    [3] Wang, W. et al. (2020). "MiniLM: Deep Self-Attention Distillation
+        for Task-Agnostic Compression of Pre-Trained Transformers."
+        NeurIPS 2020.
+
+  Libraries & Frameworks:
+    - LangChain        : https://python.langchain.com/
+    - FAISS            : https://github.com/facebookresearch/faiss
+    - HuggingFace      : https://huggingface.co/sentence-transformers
+    - ChromaDB         : https://www.trychroma.com/
+    - Groq             : https://groq.com/
+    - sentence-transformers : https://sbert.net/
+
+  Models:
+    - all-MiniLM-L6-v2 : https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+    - LLaMA 3.1 8B     : https://ai.meta.com/llama/
+
+
+================================================================================
+                         END OF REPORT
+================================================================================

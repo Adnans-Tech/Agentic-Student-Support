@@ -229,9 +229,11 @@ class DataImporter:
                     stats['skipped'] += 1
                     continue
                 
-                # PASSWORD = ROLL NUMBER (as requested)
-                password = roll_number
-                password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+                # We no longer auto-generate passwords or user accounts here.
+                # Students must register via the web interface to create their login accounts
+                # and set their own custom passwords. This script only pre-loads their
+                # profiles into the students table.
+                password_hash = ''
                 
                 # Insert into database
                 cursor.execute("""
@@ -241,7 +243,7 @@ class DataImporter:
                 """, (email, roll_number, full_name, password_hash, department, year, phone))
                 
                 stats['inserted'] += 1
-                print(f"✓ Imported: {full_name} | Roll: {roll_number} | Password: {roll_number}")
+                print(f"✓ Imported: {full_name} | Roll: {roll_number} (Must register to set password)")
                 
             except sqlite3.IntegrityError as e:
                 stats['errors'].append(f"Row {idx+2}: Duplicate data - {str(e)}")
@@ -265,9 +267,9 @@ class DataImporter:
             for error in stats['errors'][:10]:
                 print(f"  - {error}")
         print("="*60)
-        print("\n📝 LOGIN CREDENTIALS:")
-        print("   Username: Student's Roll Number (e.g., 22AG1A0501)")
-        print("   Password: Same as Roll Number")
+        print("\n📝 LOGIN INSTRUCTIONS:")
+        print("   Students must REGISTER on the portal first to set their passwords.")
+        print("   They cannot login with their roll number as a password anymore.")
         print("="*60)
         
         stats['success'] = True

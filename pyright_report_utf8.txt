@@ -1,0 +1,36 @@
+﻿node.exe : Config 
+contains 
+unrecognized 
+setting 
+"pythonPath".
+At line:1 char:1
++ & "C:\Program File
+s\nodejs/node.exe" 
+"C:\Program Files\no
+dejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo  
+            : NotS  
+  pecified: (Conf   
+ ig contains...g    
+ "pythonPath".:    
+String) [], Rem    
+oteException
+    + FullyQualifie 
+   dErrorId : Nati  
+  veCommandError
+ 
+c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\agent_data_access.py
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\agent_data_access.py:23:10 - warning: Import ".db_config" could not be resolved (reportMissingImports)
+c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\chat_memory.py
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\chat_memory.py:38:12 - warning: Import "chromadb" could not be resolved (reportMissingImports)
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\chat_memory.py:39:10 - warning: Import "chromadb.config" could not be resolved (reportMissingImports)
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\chat_memory.py:47:12 - warning: Import "redis" could not be resolved (reportMissingImports)
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\chat_memory.py:465:18 - warning: Import "upstash_redis" could not be resolved (reportMissingImports)
+c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\history_rag_service.py
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\history_rag_service.py:6:12 - warning: Import "chromadb" could not be resolved (reportMissingImports)
+  c:\Users\mohd adnan\Desktop\ACE SUPPORT\agents\history_rag_service.py:7:10 - warning: Import "chromadb.config" could not be resolved (reportMissingImports)
+0 errors, 7 warnings, 0 informations
