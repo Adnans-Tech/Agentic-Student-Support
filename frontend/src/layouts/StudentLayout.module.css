@@ -1,22 +1,45 @@
-/* Student Layout Styles */
+/* Student Layout Styles — Theme-Aware */
 
 .layout {
     display: flex;
     min-height: 100vh;
     background: var(--color-bg-primary);
+    position: relative;
+    transition: background-color 0.3s ease;
 }
 
 .main {
-    margin-left: 240px;
+    margin-left: 260px;
     flex: 1;
     min-height: 100vh;
     overflow-x: hidden;
-    transition: margin-left 0.3s ease;
+    transition: margin-left 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 0.3s ease;
+    position: relative;
+    z-index: 1;
+}
+
+.main.collapsed {
+    margin-left: 80px;
 }
 
 /* Responsive */
 @media (max-width: 768px) {
     .main {
-        margin-left: 60px;
+        margin-left: 0;
+    }
+
+    .main.collapsed {
+        margin-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .layout {
+        animation: none;
+    }
+
+    .main {
+        transition: none;
     }
 }

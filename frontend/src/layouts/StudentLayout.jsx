@@ -1,17 +1,22 @@
 /**
- * Student Layout
- * Wraps student pages with sidebar navigation
+ * Shared Layout — Used for both Student & Faculty
+ * Wraps pages with role-aware sidebar navigation
  */
 
+import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from '../components/navigation/Sidebar';
+import AnnouncementBanner from '../components/common/AnnouncementBanner';
 import styles from './StudentLayout.module.css';
 
 const StudentLayout = () => {
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
     return (
         <div className={styles.layout}>
-            <Sidebar />
-            <main className={styles.main}>
+            <Sidebar isCollapsed={isSidebarCollapsed} toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)} />
+            <main className={`${styles.main} ${isSidebarCollapsed ? styles.collapsed : ''}`}>
+                <AnnouncementBanner />
                 <Outlet />
             </main>
         </div>

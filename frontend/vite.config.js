@@ -5,6 +5,19 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    watch: {
+      // Exclude heavy directories from Vite's file watcher
+      // Prevents HMR from polling .venv (51K+ files) and other non-frontend dirs
+      ignored: [
+        '**/node_modules/**',
+        '**/.venv/**',
+        '**/__pycache__/**',
+        '**/data/**',
+        '**/.git/**'
+      ]
+    }
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

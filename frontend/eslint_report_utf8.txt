@@ -1,0 +1,146 @@
+﻿
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\chat\ConfirmationCard.jsx
+  8:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\chat\StreamingStatus.jsx
+  6:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\common\AnnouncementBanner.jsx
+   3:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  19:18  error  'e' is defined but never used                                                  no-unused-vars
+  67:49  error  'idx' is defined but never used                                                no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\common\Toast.jsx
+  7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\dashboard\DashboardComponents.jsx
+  7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\components\navigation\Sidebar.jsx
+   7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  86:13  error  Empty block statement                                                          no-empty
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\contexts\ThemeContext.jsx
+  10:14  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  27:65  error  Empty block statement                                                                                                           no-empty
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\admin\Announcements.jsx
+  7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\admin\Dashboard.jsx
+  7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\admin\Reports.jsx
+  7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\admin\TicketOversight.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                    no-unused-vars
+  22:8   warning  React Hook useEffect has a missing dependency: 'fetchTickets'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\admin\UserManagement.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                   no-unused-vars
+  58:9   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\auth\OTPVerification.jsx
+  8:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\auth\StudentLogin.jsx
+   9:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u           no-unused-vars
+  12:10  error  'getDefaultRoute' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\auth\StudentRegister.jsx
+  9:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\faculty\ChatAssistant.jsx
+  177:60  error  '_' is defined but never used    no-unused-vars
+  193:22  error  'err' is defined but never used  no-unused-vars
+  197:26  error  '_' is defined but never used    no-unused-vars
+  197:29  error  Empty block statement            no-empty
+  309:84  error  '_' is defined but never used    no-unused-vars
+  309:87  error  Empty block statement            no-empty
+  360:86  error  '_' is defined but never used    no-unused-vars
+  360:89  error  Empty block statement            no-empty
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\faculty\Dashboard.jsx
+    7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  105:18  error  'err' is defined but never used                                                no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\faculty\EmailInbox.jsx
+   2:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                  no-unused-vars
+  26:8   warning  React Hook useEffect has a missing dependency: 'loadEmails'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\faculty\Profile.jsx
+   7:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                no-unused-vars
+  23:11  error  'user' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u         no-unused-vars
+  24:20  error  'toggleTheme' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\faculty\ViewTickets.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\ChatSupport.jsx
+    8:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                  no-unused-vars
+   11:26  error  'staggerContainer' is defined but never used. Allowed unused vars must match /^[A-Z_]/u        no-unused-vars
+   11:44  error  'staggerItem' is defined but never used. Allowed unused vars must match /^[A-Z_]/u             no-unused-vars
+   37:12  error  'activeTool' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u     no-unused-vars
+   37:24  error  'setActiveTool' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+   39:19  error  'setTheme' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u       no-unused-vars
+  130:63  error  'e' is defined but never used                                                                  no-unused-vars
+  159:26  error  'e' is defined but never used                                                                  no-unused-vars
+  416:18  error  'error' is defined but never used                                                              no-unused-vars
+  506:18  error  'error' is defined but never used                                                              no-unused-vars
+  585:53  error  'index' is defined but never used                                                              no-unused-vars
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\ContactFaculty.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                   no-unused-vars
+  27:8   warning  React Hook useEffect has a missing dependency: 'loadQuota'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+  31:8   warning  React Hook useEffect has a missing dependency: 'loadFaculty'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\Dashboard.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                         no-unused-vars
+  30:8   warning  React Hook useEffect has a missing dependency: 'user?.roll_number'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\EmailHistory.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                        no-unused-vars
+  22:8   warning  React Hook useEffect has a missing dependency: 'loadEmailHistory'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\Emails.jsx
+   8:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                              no-unused-vars
+  12:26  error    'modalBackdrop' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                       no-unused-vars
+  12:41  error    'modalContent' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                        no-unused-vars
+  55:8   warning  React Hook useEffect has missing dependencies: 'emails.length' and 'loadEmailHistory'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\Profile.jsx
+   8:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                         no-unused-vars
+  75:8   warning  React Hook useEffect has a missing dependency: 'user?.roll_number'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\RaiseTicket.jsx
+   8:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                          no-unused-vars
+  45:8   warning  React Hook useEffect has missing dependencies: 'loadTickets' and 'tickets.length'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\pages\student\TicketHistory.jsx
+   7:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                   no-unused-vars
+  27:8   warning  React Hook useEffect has a missing dependency: 'loadTickets'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\services\adminService.js
+    6:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   26:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   36:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   47:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   58:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   67:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   76:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   88:9  error  Unnecessary try/catch wrapper  no-useless-catch
+   99:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  109:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  118:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  127:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  136:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  146:9  error  Unnecessary try/catch wrapper  no-useless-catch
+  155:9  error  Unnecessary try/catch wrapper  no-useless-catch
+
+C:\Users\mohd adnan\Desktop\ACE SUPPORT\frontend\src\services\authService.js
+  102:18  error  'e' is defined but never used  no-unused-vars
+
+Γ£û 82 problems (71 errors, 11 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+
