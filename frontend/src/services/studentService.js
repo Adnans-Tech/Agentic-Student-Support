@@ -253,6 +253,38 @@ const studentService = {
             throw error.response?.data || { error: 'Failed to delete photo' };
         }
     },
+
+    // === CALENDAR EVENTS ===
+
+    async getCalendarEvents() {
+        try {
+            const response = await api.get('/calendar/events');
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || { error: 'Failed to fetch calendar events' };
+        }
+    },
+
+    async addCalendarEvent(title, eventDate) {
+        try {
+            const response = await api.post('/calendar/events', {
+                title,
+                event_date: eventDate
+            });
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || { error: 'Failed to add calendar event' };
+        }
+    },
+
+    async deleteCalendarEvent(eventId) {
+        try {
+            const response = await api.delete(`/calendar/events/${eventId}`);
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || { error: 'Failed to delete calendar event' };
+        }
+    },
 };
 
 export default studentService;

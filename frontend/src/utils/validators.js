@@ -1,126 +1,150 @@
 /**
- * Form Validation Utilities
+ * Form Validators
+ * Client-side validation utilities for auth forms
  */
 
 export const validators = {
-    // Email validation
-    email: (value) => {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!value) return 'Email is required';
-        if (!emailRegex.test(value)) return 'Invalid email format';
+
+    /**
+     * Required field check
+     */
+    required: (value, fieldName = 'This field') => {
+        if (!value || !value.trim()) {
+            return `${fieldName} is required`;
+        }
         return null;
     },
 
-    // Password validation
+    /**
+     * Email validation
+     */
+    email: (value) => {
+        if (!value || !value.trim()) return 'Email is required';
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value.trim())) return 'Please enter a valid email address';
+        return null;
+    },
+
+    /**
+     * Password validation
+     * At least 8 chars, one uppercase, one digit, one special char (_, -, ., !)
+     */
     password: (value) => {
         if (!value) return 'Password is required';
-        if (value.length < 6) return 'Password must be at least 6 characters';
+        if (value.length < 8) return 'Password must be at least 8 characters';
+        if (!/[A-Z]/.test(value)) return 'Password must contain at least one uppercase letter';
+        if (!/[0-9]/.test(value)) return 'Password must contain at least one digit';
+        if (!/[_\-.!]/.test(value)) return 'Password must contain at least one special character (_, -, ., !)';
         return null;
     },
 
-    // Password strength check
-    passwordStrength: (value) => {
-        if (!value) return { strength: '', score: 0 };
-
-        let score = 0;
-
-        // Length check
-        if (value.length >= 8) score++;
-        if (value.length >= 12) score++;
-
-        // Character variety
-        if (/[a-z]/.test(value)) score++;
-        if (/[A-Z]/.test(value)) score++;
-        if (/[0-9]/.test(value)) score++;
-        if (/[^a-zA-Z0-9]/.test(value)) score++;
-
-        if (score <= 2) return { strength: 'Weak', score, className: 'weak' };
-        if (score <= 4) return { strength: 'Medium', score, className: 'medium' };
-        return { strength: 'Strong', score, className: 'strong' };
-    },
-
-    // Required field
-    required: (value, fieldName = 'This field') => {
-        if (!value || value.trim() === '') return `${fieldName} is required`;
-        return null;
-    },
-
-    // Roll number validation - Format: 22AG1A0000 or 22AG5A0000
-    // 2 digits + AG + digit(1-5) + A + 4 digits
-    rollNumber: (value) => {
-        if (!value) return 'Roll number is required';
-
-        // Auto-convert to uppercase for validation
-        const formatted = value.toUpperCase().trim();
-
-        // Check minimum length
-        if (formatted.length < 8) return 'Roll number is too short';
-
-        // Pattern: 2 digits + AG + 1 digit (1-5) + A + at least 2 alphanumeric
-        const rollRegex = /^\d{2}AG[1-5]A[A-Z0-9]{2,}$/;
-
-        if (!rollRegex.test(formatted)) {
-            return 'Roll number must start with format like 22AG1A (e.g., 22AG1A0000 or 22AG1A66A8)';
-        }
-
-        return null;
-    },
-
-    // Phone validation (10 digits)
-    phone: (value) => {
-        if (!value) return null; // Phone is optional
-        const phoneRegex = /^[0-9]{10}$/;
-        if (!phoneRegex.test(value)) return 'Phone must be 10 digits';
-        return null;
-    },
-
-    // OTP validation (6 digits)
-    otp: (value) => {
-        if (!value) return 'OTP is required';
-        if (!/^[0-9]{6}$/.test(value)) return 'OTP must be 6 digits';
-        return null;
-    },
-
-    // Year validation
-    year: (value) => {
-        if (!value) return 'Year is required';
-        const yearNum = parseInt(value);
-        if (![1, 2, 3, 4].includes(yearNum)) return 'Year must be 1, 2, 3, or 4';
-        return null;
-    },
-
-    // === Faculty-Specific Validators ===
-
-    // Official email validation (stricter for faculty)
-    officialEmail: (value) => {
-        if (!value) return 'Official email is required';
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(value)) return 'Invalid email format';
-        return null;
-    },
-
-    // Employee ID validation
-    employeeId: (value) => {
-        if (!value) return 'Employee ID is required';
-        // Allow alphanumeric employee IDs (e.g., EMP12345, FAC001)
-        if (value.trim().length < 3) return 'Employee ID must be at least 3 characters';
-        return null;
-    },
-
-    // Password confirmation validation
+    /**
+     * Confirm password validation
+     */
     confirmPassword: (password, confirmPassword) => {
         if (!confirmPassword) return 'Please confirm your password';
         if (password !== confirmPassword) return 'Passwords do not match';
         return null;
     },
+
+    /**
+     * Roll Number validation (CSM department only)
+     * Regular: 22AG1A66XX
+     * Lateral: 23AG5A66XX
+     */
+    rollNumber: (value) => {
+        if (!value || !value.trim()) return 'Roll number is required';
+        const upper = value.trim().toUpperCase();
+        if (upper.length !== 10) return 'Roll number must be exactly 10 characters';
+        const regularPattern = /^22AG1A66[A-Z0-9]{2}$/;
+        const lateralPattern = /^23AG5A66[A-Z0-9]{2}$/;
+        if (!regularPattern.test(upper) && !lateralPattern.test(upper)) {
+            return 'Invalid roll number. Expected: 22AG1A66XX (regular) or 23AG5A66XX (lateral)';
+        }
+        return null;
+    },
+
+    /**
+     * Phone number validation
+     */
+    phone: (value) => {
+        if (!value || !value.trim()) return null; // Optional
+        const phone = value.trim();
+        if (!/^\d{10}$/.test(phone)) return 'Phone number must be exactly 10 digits';
+        return null;
+    },
+
+    /**
+     * OTP validation
+     */
+    otp: (value) => {
+        if (!value) return 'OTP is required';
+        if (!/^\d{6}$/.test(value)) return 'OTP must be exactly 6 digits';
+        return null;
+    },
+
+    /**
+     * Official email validation for faculty
+     */
+    officialEmail: (value) => {
+        if (!value || !value.trim()) return 'Official email is required';
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value.trim())) return 'Please enter a valid email address';
+        // Admin exception
+        if (value.trim().toLowerCase() === 'mailtomohdadnan@gmail.com') return null;
+        if (!value.trim().toLowerCase().endsWith('@aceec.ac.in')) {
+            return 'Faculty email must end with @aceec.ac.in';
+        }
+        return null;
+    },
+
+    /**
+     * Employee ID validation
+     */
+    employeeId: (value) => {
+        // Optional field
+        if (!value || !value.trim()) return null;
+        const id = value.trim().toUpperCase();
+        if (id.length < 3) return 'Employee ID must be at least 3 characters';
+        return null;
+    },
+
+    /**
+     * Password strength meter
+     */
+    passwordStrength: (password) => {
+        if (!password) return { strength: '', score: 0, className: '' };
+
+        let score = 0;
+        if (password.length >= 8) score++;
+        if (password.length >= 12) score++;
+        if (/[A-Z]/.test(password)) score++;
+        if (/[0-9]/.test(password)) score++;
+        if (/[_\-.!]/.test(password)) score++;
+        if (/[^A-Za-z0-9_\-.!]/.test(password)) score++;
+
+        if (score <= 2) return { strength: 'Weak', score, className: 'strengthWeak' };
+        if (score === 3) return { strength: 'Medium', score, className: 'strengthMedium' };
+        return { strength: 'Strong', score, className: 'strengthStrong' };
+    },
 };
 
 /**
- * Format validation errors from backend
+ * Format backend error response
  */
 export const formatBackendError = (error) => {
     if (typeof error === 'string') return error;
-    if (error.error) return error.error;
-    if (error.message) return error.message;
-    return 'An error occurred. Please try again.';
+
+    // Axios error with response
+    if (error?.response?.data) {
+        const data = error.response.data;
+        if (data.error) return data.error;
+        if (data.message) return data.message;
+    }
+
+    // Direct error object
+    if (error?.error) return error.error;
+    if (error?.message) return error.message;
+
+    return 'Something went wrong. Please try again.';
 };

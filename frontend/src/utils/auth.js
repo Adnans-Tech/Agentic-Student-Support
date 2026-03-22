@@ -30,6 +30,7 @@ export const getUserRole = () => {
  * Check if user has specific role
  */
 export const hasRole = (role) => {
+    if (isAdmin()) return true;
     const userRole = getUserRole();
     return userRole === role;
 };
@@ -49,9 +50,18 @@ export const isFaculty = () => {
 };
 
 /**
- * Get redirect path based on user role
+ * Check if user is admin (flag based, overrides role)
+ */
+export const isAdmin = () => {
+    const user = getCurrentUser();
+    return user?.is_admin === true;
+};
+
+/**
+ * Get redirect path based on user role and admin flag
  */
 export const getDefaultRoute = () => {
+    if (isAdmin()) return '/admin/dashboard';
     if (isStudent()) return '/student/dashboard';
     if (isFaculty()) return '/faculty/dashboard';
     return '/login';

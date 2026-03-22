@@ -1,189 +1,191 @@
 /**
- * Authentication Service
- * Handles all authentication-related API calls
+ * Unified Authentication Service
+ * Handles all auth API calls: register, login, OTP, logout
  */
 
 import api from './api';
 
-const authService = {
-    // === STUDENT REGISTRATION ===
+const TOKEN_KEY = 'aceToken';
+const USER_KEY = 'aceUser';
 
-    async registerStudent(data) {
+const authService = {
+
+    // =============================================
+    // Unified Registration
+    // =============================================
+
+    /**
+     * Register a new user (student or faculty)
+     * @param {Object} data - Registration data including 'role' field
+     */
+    register: async (data) => {
         try {
-            const response = await api.post('/auth/register', {
-                email: data.email,
-                roll_number: data.rollNumber,
-                full_name: data.fullName,
-                password: data.password,
-                department: data.department,
-                year: data.year,
-                phone: data.phone || '',
-            });
+            const response = await api.post('/auth/register', data);
             return response.data;
         } catch (error) {
             throw error.response?.data || { error: 'Registration failed' };
         }
     },
 
-    // === OTP MANAGEMENT ===
+    // =============================================
+    // OTP
+    // =============================================
 
-    async sendOTP(email, resend = false) {
+    /**
+     * Send OTP to email
+     * @param {string} email
+     * @param {boolean} resend - Whether this is a resend request
+     */
+    sendOTP: async (email, resend = false) => {
         try {
-            const response = await api.post('/auth/send-otp', {
-                email,
-                resend,
-            });
+            const response = await api.post('/auth/send-otp', { email, resend });
             return response.data;
         } catch (error) {
             throw error.response?.data || { error: 'Failed to send OTP' };
         }
     },
 
-    async verifyOTP(email, otp) {
+    /**
+     * Verify OTP code
+     * @param {string} email
+     * @param {string} otp
+     */
+    verifyOTP: async (email, otp) => {
         try {
-            const response = await api.post('/auth/verify-otp', {
-                email,
-                otp,
-            });
-
-            // Store token and user data
+            const response = await api.post('/auth/verify-otp', { email, otp });
             if (response.data.success && response.data.token) {
-                localStorage.setItem('ace_auth_token', response.data.token);
-                localStorage.setItem('ace_user', JSON.stringify(response.data.user));
+                authService.setToken(response.data.token);
+                authService.setUser(response.data.user);
             }
-
             return response.data;
         } catch (error) {
             throw error.response?.data || { error: 'OTP verification failed' };
         }
     },
 
-    // === LOGIN ===
+    // =============================================
+    // Login
+    // =============================================
 
-    async loginStudent(identifier, password) {
+    /**
+     * Login with email + password (unified for student & faculty)
+     * @param {string} email
+     * @param {string} password
+     */
+    login: async (email, password) => {
         try {
-            const response = await api.post('/auth/login/student', {
-                identifier,
-                password,
-            });
-
-            // Store token and user data
+            const response = await api.post('/auth/login', { email, password });
             if (response.data.success && response.data.token) {
-                localStorage.setItem('ace_auth_token', response.data.token);
-                localStorage.setItem('ace_user', JSON.stringify(response.data.user));
+                authService.setToken(response.data.token);
+                authService.setUser(response.data.user);
             }
-
             return response.data;
         } catch (error) {
-            throw error.response?.data || { error: 'Login failed' };
+            // Pass through the response data for requires_verification handling
+            if (error.response?.data) {
+                throw error;
+            }
+            throw { response: { data: { error: 'Login failed' } } };
         }
     },
 
-    async loginFaculty(email, password) {
+    // =============================================
+    // Logout
+    // =============================================
+
+    logout: async () => {
         try {
-            const response = await api.post('/auth/faculty/login', {
-                email,
-                password,
-            });
-
-            // Store token and user data
-            if (response.data.success && response.data.token) {
-                localStorage.setItem('ace_auth_token', response.data.token);
-                localStorage.setItem('ace_user', JSON.stringify(response.data.user));
+            const token = authService.getToken();
+            if (token) {
+                await api.post('/auth/logout');
             }
-
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { error: 'Login failed' };
+        } catch (e) {
+            // Ignore errors during logout
+        } finally {
+            authService.clearAuth();
+            window.location.href = '/login';
         }
     },
 
-    // === GET CURRENT USER ===
+    // =============================================
+    // Change Password
+    // =============================================
 
-    async getCurrentUser() {
+    /**
+     * Change the current user's password
+     * @param {string} currentPassword
+     * @param {string} newPassword
+     * @param {string} confirmNewPassword
+     */
+    changePassword: async (currentPassword, newPassword, confirmNewPassword) => {
+        try {
+            const response = await api.post('/auth/change-password', {
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_new_password: confirmNewPassword,
+            });
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || { error: 'Failed to change password' };
+        }
+    },
+
+    // =============================================
+    // Current User
+    // =============================================
+
+    /**
+     * Get current authenticated user details
+     */
+    getCurrentUser: async () => {
         try {
             const response = await api.get('/auth/me');
-
             if (response.data.success) {
-                localStorage.setItem('ace_user', JSON.stringify(response.data.user));
+                authService.setUser(response.data.user);
             }
-
             return response.data;
         } catch (error) {
-            throw error.response?.data || { error: 'Failed to fetch user data' };
+            throw error.response?.data || { error: 'Failed to get user data' };
         }
     },
 
-    // === LOGOUT ===
+    // =============================================
+    // Token & Storage Management
+    // =============================================
 
-    logout() {
-        localStorage.removeItem('ace_auth_token');
-        localStorage.removeItem('ace_user');
-        window.location.href = '/login';
+    setToken: (token) => {
+        localStorage.setItem(TOKEN_KEY, token);
     },
 
-    // === HELPERS ===
-
-    isAuthenticated() {
-        return !!localStorage.getItem('ace_auth_token');
+    getToken: () => {
+        return localStorage.getItem(TOKEN_KEY);
     },
 
-    getUser() {
-        const userStr = localStorage.getItem('ace_user');
-        return userStr ? JSON.parse(userStr) : null;
+    setUser: (user) => {
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
     },
 
-    getToken() {
-        return localStorage.getItem('ace_auth_token');
-    },
-
-    // === FACULTY REGISTRATION ===
-
-    async registerFaculty(data) {
+    getUser: () => {
         try {
-            const response = await api.post('/auth/faculty/register', {
-                official_email: data.officialEmail,
-                full_name: data.fullName,
-                employee_id: data.employeeId,
-                department: data.department,
-                designation: data.designation || '',
-                password: data.password,
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { error: 'Registration failed' };
+            const user = localStorage.getItem(USER_KEY);
+            return user ? JSON.parse(user) : null;
+        } catch {
+            return null;
         }
     },
 
-    async sendFacultyOTP(email, resend = false) {
-        try {
-            const response = await api.post('/auth/faculty/send-otp', {
-                email,
-                resend,
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { error: 'Failed to send OTP' };
-        }
+    clearAuth: () => {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
     },
 
-    async verifyFacultyOTP(email, otp) {
-        try {
-            const response = await api.post('/auth/faculty/verify-otp', {
-                email,
-                otp,
-            });
+    isAuthenticated: () => {
+        return !!authService.getToken();
+    },
 
-            // Store token and user data
-            if (response.data.success && response.data.token) {
-                localStorage.setItem('ace_auth_token', response.data.token);
-                localStorage.setItem('ace_user', JSON.stringify(response.data.user));
-            }
-
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || { error: 'OTP verification failed' };
-        }
+    getUserRole: () => {
+        const user = authService.getUser();
+        return user?.role || null;
     },
 };
 
