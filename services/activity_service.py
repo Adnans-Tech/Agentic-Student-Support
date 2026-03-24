@@ -4,10 +4,11 @@ Standardized activity logging and retrieval for students.
 Uses enum-based event types and Asia/Kolkata timestamps.
 """
 
-import sqlite3
+import os
 import logging
 from datetime import datetime
 import pytz
+from core.db_config import db_cursor, adapt_query, is_postgres
 
 logger = logging.getLogger('activity_service')
 
@@ -57,19 +58,14 @@ class ActivityService:
             logger.warning(f"Unknown activity type: {action_type} for {student_email}")
 
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO student_activity (student_email, action_type, action_description, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (student_email, action_type, description, ActivityService._now_ist()))
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    INSERT INTO student_activity (student_email, action_type, action_description, created_at)
+                    VALUES (?, ?, ?, ?)
+                """), (student_email, action_type, description, ActivityService._now_ist()))
             logger.info(f"ACTIVITY_LOG | {student_email} | {action_type} | {description}")
-        except sqlite3.IntegrityError as e:
-            # Foreign key constraint: external email not in students table
-            logger.warning(f"ACTIVITY_LOG_SKIPPED | {student_email} | {action_type} | External email or missing student")
         except Exception as e:
+            # Handle generic and integrity errors
             logger.error(f"ACTIVITY_LOG_FAIL | {student_email} | {action_type} | {e}")
 
     @staticmethod
@@ -85,26 +81,23 @@ class ActivityService:
             List of activity dicts with type, description, timestamp
         """
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT action_type, action_description, created_at
-                FROM student_activity
-                WHERE student_email = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (student_email, limit))
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT action_type, action_description, created_at
+                    FROM student_activity
+                    WHERE student_email = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """), (student_email, limit))
 
-            activities = []
-            for row in cursor.fetchall():
-                activities.append({
-                    'type': row['action_type'],
-                    'description': row['action_description'],
-                    'timestamp': row['created_at']
-                })
-            conn.close()
-            return activities
+                activities = []
+                for row in cursor.fetchall():
+                    activities.append({
+                        'type': row['action_type'],
+                        'description': row['action_description'],
+                        'timestamp': row['created_at']
+                    })
+                return activities
         except Exception as e:
             logger.error(f"ACTIVITY_FETCH_FAIL | {student_email} | {e}")
             return []
@@ -133,22 +126,23 @@ class ActivityService:
     # =========================================================================
     @staticmethod
     def _ensure_calendar_table():
-        """Create calendar_events table if it doesn't exist."""
+        """Create calendar_events table if it doesn't exist (skip on Vercel)."""
+        if os.getenv('VERCEL') or is_postgres():
+            return
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS calendar_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_email TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    event_date TEXT NOT NULL,
-                    event_time TEXT,
-                    description TEXT,
-                    created_at TEXT NOT NULL
-                )
-            """)
-            conn.commit()
-            conn.close()
+            from core.db_config import get_db_connection
+            with get_db_connection('students') as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS calendar_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        student_email TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        event_date TEXT NOT NULL,
+                        event_time TEXT,
+                        description TEXT,
+                        created_at TEXT NOT NULL
+                    )
+                """)
         except Exception as e:
             logger.error(f"CALENDAR_TABLE_CREATE_FAIL | {e}")
 
@@ -161,17 +155,14 @@ class ActivityService:
         """
         ActivityService._ensure_calendar_table()
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO calendar_events
-                (student_email, title, event_date, event_time, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (student_email, title, event_date, event_time, description,
-                  ActivityService._now_ist()))
-            conn.commit()
-            event_id = cursor.lastrowid
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    INSERT INTO calendar_events
+                    (student_email, title, event_date, event_time, description, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """), (student_email, title, event_date, event_time, description,
+                      ActivityService._now_ist()))
+                event_id = cursor.lastrowid if not is_postgres() else None # Placeholder
             logger.info(f"CALENDAR_EVENT_ADDED | {student_email} | {title} | {event_date}")
             return event_id
         except Exception as e:
@@ -186,17 +177,14 @@ class ActivityService:
         """
         ActivityService._ensure_calendar_table()
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title, event_date, event_time, description
-                FROM calendar_events
-                WHERE student_email = ? AND event_date = ?
-                ORDER BY event_time ASC
-            """, (student_email, event_date))
-            events = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT id, title, event_date, event_time, description
+                    FROM calendar_events
+                    WHERE student_email = ? AND event_date = ?
+                    ORDER BY event_time ASC
+                """), (student_email, event_date))
+                events = [dict(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_EVENTS_FETCH_FAIL | {student_email} | {e}")
@@ -259,15 +247,12 @@ class ActivityService:
         """
         ActivityService._ensure_calendar_table()
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM calendar_events
-                WHERE id = ? AND student_email = ?
-            """, (event_id, student_email))
-            deleted = cursor.rowcount > 0
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    DELETE FROM calendar_events
+                    WHERE id = ? AND student_email = ?
+                """), (event_id, student_email))
+                deleted = cursor.rowcount > 0
             if deleted:
                 logger.info(f"CALENDAR_EVENT_DELETED | {student_email} | event_id={event_id}")
             else:

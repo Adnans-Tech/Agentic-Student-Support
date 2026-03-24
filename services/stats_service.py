@@ -4,10 +4,11 @@ Live stats computation and weekly chart aggregation for students.
 All stats are computed from actual DB rows — never cached counters.
 """
 
-import sqlite3
+import os
 import logging
 from datetime import datetime, timedelta
 import pytz
+from core.db_config import db_cursor, adapt_query
 
 logger = logging.getLogger('stats_service')
 
@@ -45,65 +46,55 @@ class StatsService:
 
         # Ticket stats from tickets.db
         try:
-            conn = sqlite3.connect(StatsService.TICKETS_DB)
-            cursor = conn.cursor()
+            with db_cursor('tickets') as cursor:
+                cursor.execute(
+                    adapt_query("SELECT COUNT(*) FROM tickets WHERE student_email = ?"),
+                    (student_email,)
+                )
+                stats['tickets_total'] = cursor.fetchone()[0]
 
-            cursor.execute(
-                "SELECT COUNT(*) FROM tickets WHERE student_email = ?",
-                (student_email,)
-            )
-            stats['tickets_total'] = cursor.fetchone()[0]
+                cursor.execute(
+                    adapt_query("SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status = 'Open'"),
+                    (student_email,)
+                )
+                stats['tickets_open'] = cursor.fetchone()[0]
 
-            cursor.execute(
-                "SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status = 'Open'",
-                (student_email,)
-            )
-            stats['tickets_open'] = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status IN ('Resolved', 'Closed')",
-                (student_email,)
-            )
-            stats['tickets_closed'] = cursor.fetchone()[0]
-
-            conn.close()
+                cursor.execute(
+                    adapt_query("SELECT COUNT(*) FROM tickets WHERE student_email = ? AND status IN ('Resolved', 'Closed')"),
+                    (student_email,)
+                )
+                stats['tickets_closed'] = cursor.fetchone()[0]
         except Exception as e:
             logger.error(f"TICKET_STATS_FAIL | {student_email} | {e}")
 
-        # Email stats from email_requests.db
+        # Email stats from faculty_data.db
         try:
-            conn = sqlite3.connect(StatsService.EMAIL_DB)
-            cursor = conn.cursor()
+            with db_cursor('faculty_data') as cursor:
+                cursor.execute(
+                    adapt_query("SELECT COUNT(*) FROM email_requests WHERE student_email = ?"),
+                    (student_email,)
+                )
+                stats['emails_total'] = cursor.fetchone()[0]
 
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_requests WHERE student_email = ?",
-                (student_email,)
-            )
-            stats['emails_total'] = cursor.fetchone()[0]
-
-            # Emails sent today (Asia/Kolkata date)
-            today = StatsService._today_kolkata()
-            cursor.execute(
-                "SELECT COUNT(*) FROM email_requests WHERE student_email = ? AND DATE(created_at) = ?",
-                (student_email, today)
-            )
-            stats['emails_today'] = cursor.fetchone()[0]
-
-            conn.close()
+                # Emails sent today (Asia/Kolkata date)
+                today = StatsService._today_kolkata()
+                cursor.execute(
+                    adapt_query("SELECT COUNT(*) FROM email_requests WHERE student_email = ? AND DATE(created_at) = ?"),
+                    (student_email, today)
+                )
+                stats['emails_today'] = cursor.fetchone()[0]
         except Exception as e:
             logger.error(f"EMAIL_STATS_FAIL | {student_email} | {e}")
 
         # Last activity from student_activity
         try:
-            conn = sqlite3.connect(StatsService.STUDENTS_DB)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT created_at FROM student_activity WHERE student_email = ? ORDER BY created_at DESC LIMIT 1",
-                (student_email,)
-            )
-            row = cursor.fetchone()
-            stats['last_activity'] = row[0] if row else None
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(
+                    adapt_query("SELECT created_at FROM student_activity WHERE student_email = ? ORDER BY created_at DESC LIMIT 1"),
+                    (student_email,)
+                )
+                row = cursor.fetchone()
+                stats['last_activity'] = row[0] if row else None
         except Exception as e:
             logger.error(f"LAST_ACTIVITY_FAIL | {student_email} | {e}")
 
@@ -127,23 +118,20 @@ class StatsService:
         chart_data = {d: {'date': d, 'emails': 0, 'tickets': 0} for d in dates}
 
         try:
-            conn = sqlite3.connect(StatsService.STUDENTS_DB)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT usage_date, emails_sent, tickets_created
-                FROM daily_usage
-                WHERE student_email = ?
-                  AND usage_date >= ?
-                ORDER BY usage_date ASC
-            """, (student_email, dates[0]))
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT usage_date, emails_sent, tickets_created
+                    FROM daily_usage
+                    WHERE student_email = ?
+                      AND usage_date >= ?
+                    ORDER BY usage_date ASC
+                """), (student_email, dates[0]))
 
-            for row in cursor.fetchall():
-                date_str = row[0]
-                if date_str in chart_data:
-                    chart_data[date_str]['emails'] = row[1] or 0
-                    chart_data[date_str]['tickets'] = row[2] or 0
-
-            conn.close()
+                for row in cursor.fetchall():
+                    date_str = str(row[0]) # Ensure string comparison
+                    if date_str in chart_data:
+                        chart_data[date_str]['emails'] = row[1] or 0
+                        chart_data[date_str]['tickets'] = row[2] or 0
         except Exception as e:
             logger.error(f"WEEKLY_CHART_FAIL | {student_email} | {e}")
 

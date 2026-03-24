@@ -5,10 +5,11 @@ Uses Asia/Kolkata timezone for day boundaries.
 Uses BEGIN IMMEDIATE for SQLite transactional safety.
 """
 
-import sqlite3
+import os
 import logging
 from datetime import datetime
 import pytz
+from core.db_config import db_cursor, adapt_query
 
 logger = logging.getLogger('limits_service')
 
@@ -46,14 +47,12 @@ class LimitsService:
         max_allowed = EMAIL_DAILY_MAX if action_type == 'email' else TICKET_DAILY_MAX
 
         try:
-            conn = sqlite3.connect(LimitsService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT {col} FROM daily_usage
-                WHERE student_email = ? AND usage_date = ?
-            """, (student_email, today))
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query(f"""
+                    SELECT {col} FROM daily_usage
+                    WHERE student_email = ? AND usage_date = ?
+                """), (student_email, today))
+                row = cursor.fetchone()
 
             used = row[0] if row else 0
             remaining = max(0, max_allowed - used)
@@ -84,23 +83,18 @@ class LimitsService:
         today = LimitsService._today_kolkata()
         col = 'emails_sent' if action_type == 'email' else 'tickets_created'
 
-        conn = sqlite3.connect(LimitsService.DB_PATH)
         try:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(f"""
-                INSERT INTO daily_usage (student_email, usage_date, {col})
-                VALUES (?, ?, 1)
-                ON CONFLICT(student_email, usage_date)
-                DO UPDATE SET {col} = {col} + 1
-            """, (student_email, today))
-            conn.commit()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query(f"""
+                    INSERT INTO daily_usage (student_email, usage_date, {col})
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(student_email, usage_date)
+                    DO UPDATE SET {col} = daily_usage.{col} + 1
+                """), (student_email, today))
             logger.info(f"USAGE_INCREMENT | {student_email} | {action_type} | date={today}")
         except Exception as e:
-            conn.rollback()
             logger.error(f"USAGE_INCREMENT_FAIL | {student_email} | {action_type} | {e}")
             raise
-        finally:
-            conn.close()
 
     @staticmethod
     def get_remaining_limits(student_email: str) -> dict:
@@ -113,14 +107,12 @@ class LimitsService:
         today = LimitsService._today_kolkata()
 
         try:
-            conn = sqlite3.connect(LimitsService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT emails_sent, tickets_created FROM daily_usage
-                WHERE student_email = ? AND usage_date = ?
-            """, (student_email, today))
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT emails_sent, tickets_created FROM daily_usage
+                    WHERE student_email = ? AND usage_date = ?
+                """), (student_email, today))
+                row = cursor.fetchone()
 
             emails_used = row[0] if row else 0
             tickets_used = row[1] if row else 0

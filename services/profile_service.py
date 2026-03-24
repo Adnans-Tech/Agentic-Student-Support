@@ -4,11 +4,11 @@ Handles profile CRUD, photo management, and completion percentage.
 Uses UUID filenames for photos with old-file cleanup.
 """
 
-import sqlite3
 import os
 import uuid
 import logging
 import time
+from core.db_config import db_cursor, is_postgres, adapt_query
 
 logger = logging.getLogger('profile_service')
 
@@ -24,8 +24,9 @@ class ProfileService:
 
     @staticmethod
     def _ensure_photo_dir():
-        """Ensure profile photos directory exists."""
-        os.makedirs(PHOTO_DIR, exist_ok=True)
+        """Ensure profile photos directory exists (skip on Vercel)."""
+        if not os.getenv('VERCEL'):
+            os.makedirs(PHOTO_DIR, exist_ok=True)
 
     @staticmethod
     def get_profile(student_email: str) -> dict:
@@ -36,16 +37,13 @@ class ProfileService:
             dict with all profile fields, or None if not found
         """
         try:
-            conn = sqlite3.connect(ProfileService.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, email, roll_number, full_name, department, year,
-                       phone, profile_photo, is_verified, created_at, last_login
-                FROM students WHERE email = ?
-            """, (student_email,))
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT id, email, roll_number, full_name, department, year,
+                           phone, profile_photo, is_verified, created_at, last_login
+                    FROM students WHERE email = ?
+                """), (student_email,))
+                row = cursor.fetchone()
 
             if not row:
                 return None
@@ -112,18 +110,13 @@ class ProfileService:
             updates['phone'] = phone
 
         try:
-            conn = sqlite3.connect(ProfileService.DB_PATH)
-            cursor = conn.cursor()
+            with db_cursor('students') as cursor:
+                set_clause = ', '.join(f"{k} = {adapt_query('?')}" for k in updates.keys())
+                values = list(updates.values()) + [student_email]
 
-            set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-            values = list(updates.values()) + [student_email]
-
-            cursor.execute(f"""
-                UPDATE students SET {set_clause} WHERE email = ?
-            """, values)
-
-            conn.commit()
-            conn.close()
+                cursor.execute(f"""
+                    UPDATE students SET {set_clause} WHERE email = {adapt_query('?')}
+                """, values)
 
             changed = list(updates.keys())
             logger.info(f"PROFILE_UPDATE | {student_email} | fields={changed}")
@@ -171,21 +164,12 @@ class ProfileService:
             # Delete old photo first
             ProfileService._delete_old_photo(student_email)
 
-            # Save new file (atomic: write to temp, rename)
-            temp_path = full_path + '.tmp'
-            with open(temp_path, 'wb') as f:
-                f.write(file_data)
-            os.replace(temp_path, full_path)
-
             # Update DB
-            conn = sqlite3.connect(ProfileService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE students SET profile_photo = ? WHERE email = ?",
-                (relative_path, student_email)
-            )
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(
+                    adapt_query("UPDATE students SET profile_photo = ? WHERE email = ?"),
+                    (relative_path, student_email)
+                )
 
             photo_url = f"/static/{relative_path}?v={int(time.time())}"
             logger.info(f"PHOTO_UPLOAD | {student_email} | {filename}")
@@ -210,14 +194,11 @@ class ProfileService:
         try:
             ProfileService._delete_old_photo(student_email)
 
-            conn = sqlite3.connect(ProfileService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE students SET profile_photo = NULL WHERE email = ?",
-                (student_email,)
-            )
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(
+                    adapt_query("UPDATE students SET profile_photo = NULL WHERE email = ?"),
+                    (student_email,)
+                )
 
             logger.info(f"PHOTO_DELETE | {student_email}")
             return {'success': True}
@@ -228,16 +209,17 @@ class ProfileService:
 
     @staticmethod
     def _delete_old_photo(student_email: str):
-        """Delete the existing photo file from disk if it exists."""
+        """Delete the existing photo file from disk if it exists (skip on Vercel)."""
+        if os.getenv('VERCEL'):
+            return
+
         try:
-            conn = sqlite3.connect(ProfileService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT profile_photo FROM students WHERE email = ?",
-                (student_email,)
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(
+                    adapt_query("SELECT profile_photo FROM students WHERE email = ?"),
+                    (student_email,)
+                )
+                row = cursor.fetchone()
 
             if row and row[0]:
                 old_path = os.path.join('static', row[0])

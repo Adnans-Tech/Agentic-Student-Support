@@ -910,8 +910,9 @@ def get_student_stats():
 # Student Profile Endpoints (v1)
 # ============================================
 
-# Ensure profile photos directory exists
-os.makedirs(os.path.join('static', 'profile_photos'), exist_ok=True)
+# Ensure profile photos directory exists (SKIP ON VERCEL)
+if not os.getenv('VERCEL'):
+    os.makedirs(os.path.join('static', 'profile_photos'), exist_ok=True)
 
 # Import profile services
 from services.profile_service import ProfileService
