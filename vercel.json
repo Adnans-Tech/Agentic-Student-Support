@@ -16,12 +16,16 @@
       "dest": "app.py"
     },
     {
+      "src": "/assets/(.*)",
+      "dest": "frontend/dist/assets/$1"
+    },
+    {
+      "src": "/ace_logo.png",
+      "dest": "frontend/dist/ace_logo.png"
+    },
+    {
       "src": "/(.*)",
-      "dest": "frontend/dist/$1"
+      "dest": "frontend/dist/index.html"
     }
-  ],
-  "env": {
-    "USE_POSTGRES": "true",
-    "CHAT_MEMORY_BACKEND": "upstash"
-  }
+  ]
 }
