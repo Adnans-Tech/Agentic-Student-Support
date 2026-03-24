@@ -273,19 +273,19 @@ STUDENTS_DB = "data/students.db"
 def _get_faculty_department(faculty_email: str) -> Optional[str]:
     """Look up the faculty's department from students.db → faculty_profiles."""
     try:
-        conn = sqlite3.connect(STUDENTS_DB, timeout=5)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT fp.department
-            FROM faculty_profiles fp
-            JOIN users u ON u.id = fp.user_id
-            WHERE LOWER(u.email) = LOWER(?)
-            LIMIT 1
-        """, (faculty_email,))
-        row = cur.fetchone()
-        conn.close()
-        return row["department"] if row else None
+        from core.db_config import adapt_query
+        with get_db_connection('students') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(adapt_query("""
+                SELECT fp.department
+                FROM faculty_profiles fp
+                JOIN users u ON u.id = fp.user_id
+                WHERE LOWER(u.email) = LOWER(?)
+                LIMIT 1
+            """), (faculty_email,))
+            row = cur.fetchone()
+            return row["department"] if row else None
     except Exception as exc:
         print(f"[FACULTY_ORCH] _get_faculty_department error: {type(exc).__name__}")
         return None
@@ -300,39 +300,38 @@ def _get_faculty_tickets(faculty_email: str, status_filter: Optional[str] = None
     if not dept:
         return []
     try:
-        s_conn = sqlite3.connect(STUDENTS_DB, timeout=5)
-        sc = s_conn.cursor()
-        sc.execute("SELECT email FROM students WHERE department = ?", (dept,))
-        student_emails = [r[0] for r in sc.fetchall()]
-        s_conn.close()
+        from core.db_config import adapt_query
+        with get_db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
+            student_emails = [r[0] for r in sc.fetchall()]
 
         if not student_emails:
             return []
 
-        t_conn = sqlite3.connect(TICKETS_DB, timeout=5)
-        t_conn.row_factory = sqlite3.Row
-        tc = t_conn.cursor()
+        with get_db_connection('tickets') as t_conn:
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
 
-        placeholders = ",".join(["?"] * len(student_emails))
-        if status_filter:
-            tc.execute(
-                f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
-                f"       description, created_at, resolved_by, resolved_at, resolution_note "
-                f"FROM tickets WHERE student_email IN ({placeholders}) AND status = ? "
-                f"ORDER BY created_at DESC LIMIT 20",
-                student_emails + [status_filter],
-            )
-        else:
-            tc.execute(
-                f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
-                f"       description, created_at, resolved_by, resolved_at, resolution_note "
-                f"FROM tickets WHERE student_email IN ({placeholders}) "
-                f"ORDER BY created_at DESC LIMIT 20",
-                student_emails,
-            )
-        rows = [dict(r) for r in tc.fetchall()]
-        t_conn.close()
-        print(f"[FACULTY_ORCH] _get_faculty_tickets → dept=<str>, count={len(rows)}")
+            placeholders = ",".join(["?"] * len(student_emails))
+            if status_filter:
+                tc.execute(adapt_query(
+                    f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
+                    f"       description, created_at, resolved_by, resolved_at, resolution_note "
+                    f"FROM tickets WHERE student_email IN ({placeholders}) AND status = ? "
+                    f"ORDER BY created_at DESC LIMIT 20"),
+                    student_emails + [status_filter],
+                )
+            else:
+                tc.execute(adapt_query(
+                    f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
+                    f"       description, created_at, resolved_by, resolved_at, resolution_note "
+                    f"FROM tickets WHERE student_email IN ({placeholders}) "
+                    f"ORDER BY created_at DESC LIMIT 20"),
+                    student_emails,
+                )
+            rows = [dict(r) for r in tc.fetchall()]
+        print(f"[FACULTY_ORCH] _get_faculty_tickets → count={len(rows)}")
         return rows
     except Exception as exc:
         print(f"[FACULTY_ORCH] _get_faculty_tickets error: {type(exc).__name__}")
@@ -351,41 +350,37 @@ def _resolve_ticket_in_db(
         return {"success": False, "error": "Could not determine your department. Please check your profile."}
 
     try:
-        s_conn = sqlite3.connect(STUDENTS_DB, timeout=5)
-        sc = s_conn.cursor()
-        sc.execute("SELECT email FROM students WHERE department = ?", (dept,))
-        student_emails = {r[0] for r in sc.fetchall()}
-        s_conn.close()
+        from core.db_config import adapt_query
+        with get_db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
+            student_emails = {r[0] for r in sc.fetchall()}
 
-        t_conn = sqlite3.connect(TICKETS_DB, timeout=10)
-        t_conn.row_factory = sqlite3.Row
-        tc = t_conn.cursor()
+        with get_db_connection('tickets') as t_conn:
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
 
-        tc.execute("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?", (ticket_id,))
-        row = tc.fetchone()
+            tc.execute(adapt_query("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
+            row = tc.fetchone()
 
-        if not row:
-            t_conn.close()
-            return {"success": False, "error": f"Ticket **{ticket_id}** not found."}
+            if not row:
+                return {"success": False, "error": f"Ticket **{ticket_id}** not found."}
 
-        if row["student_email"] not in student_emails:
-            t_conn.close()
-            return {"success": False, "error": "You are not authorised to resolve this ticket (department mismatch)."}
+            if row["student_email"] not in student_emails:
+                return {"success": False, "error": "You are not authorised to resolve this ticket (department mismatch)."}
 
-        if row["status"] in ("Resolved", "Closed"):
-            t_conn.close()
-            return {"success": False, "error": f"Ticket **{ticket_id}** is already {row['status']}."}
+            if row["status"] in ("Resolved", "Closed"):
+                return {"success": False, "error": f"Ticket **{ticket_id}** is already {row['status']}."}
 
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        tc.execute("""
-            UPDATE tickets
-            SET status = 'Resolved', updated_at = ?, resolved_by = ?,
-                resolved_at = ?, resolution_note = ?
-            WHERE ticket_id = ?
-        """, (now, faculty_email, now, resolution_note.strip(), ticket_id))
-        t_conn.commit()
-        t_conn.close()
-        print(f"[FACULTY_ORCH] Ticket resolved: id=<id>, faculty=<faculty>")
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            tc.execute(adapt_query("""
+                UPDATE tickets
+                SET status = 'Resolved', updated_at = ?, resolved_by = ?,
+                    resolved_at = ?, resolution_note = ?
+                WHERE ticket_id = ?
+            """), (now, faculty_email, now, resolution_note.strip(), ticket_id))
+            t_conn.commit()
+        print(f"[FACULTY_ORCH] Ticket resolved: id={ticket_id}, faculty={faculty_email}")
         return {"success": True, "ticket_id": ticket_id}
     except Exception as exc:
         print(f"[FACULTY_ORCH] _resolve_ticket_in_db error: {type(exc).__name__}")
@@ -402,20 +397,20 @@ EMAIL_DB = "data/faculty_data.db"
 def _get_faculty_email_history(faculty_name: str, limit: int = 10) -> list:
     """Returns recent emails addressed to this faculty (by name match)."""
     try:
-        conn = sqlite3.connect(EMAIL_DB, timeout=5)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, student_name, student_roll_no, subject, status, timestamp
-            FROM email_requests
-            WHERE LOWER(faculty_name) LIKE LOWER(?)
-            ORDER BY timestamp DESC LIMIT ?
-            """,
-            (f"%{faculty_name}%", limit),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        conn.close()
+        from core.db_config import adapt_query
+        with get_db_connection('faculty_data') as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(adapt_query(
+                """
+                SELECT id, student_name, student_roll_no, subject, status, timestamp
+                FROM email_requests
+                WHERE LOWER(faculty_name) LIKE LOWER(?)
+                ORDER BY timestamp DESC LIMIT ?
+                """),
+                (f"%{faculty_name}%", limit),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
         print(f"[FACULTY_ORCH] _get_faculty_email_history → count={len(rows)}")
         return rows
     except Exception as exc:

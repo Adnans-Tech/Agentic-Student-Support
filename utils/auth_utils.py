@@ -13,8 +13,11 @@ from typing import Dict, List, Optional
 from functools import wraps
 from flask import request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-import sqlite3
 import os
+import sqlite3
+
+# Import centralized database utilities
+from core.db_config import get_db_connection, is_postgres, adapt_query
 
 # ============================================
 # JWT Configuration
@@ -129,17 +132,23 @@ def generate_otp():
 
 def store_otp(email, otp_code):
     """
-    Store OTP in the unified auth database (AUTH_DB_PATH).
+    Store OTP in the database.
     Invalidates any previously unused OTPs for this email first.
     Stores a SHA-256 hash of the code (column: code_hash) for security.
     """
-    os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(AUTH_DB_PATH)
+    # Safe directory creation for local SQLite
+    if not is_postgres():
+        try:
+            os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
+        except OSError:
+            pass
+
+    conn = get_db_connection('students')
     cursor = conn.cursor()
 
     # Invalidate all previous unused OTPs for this email
     cursor.execute(
-        "UPDATE otp_verification SET is_used = 1 WHERE email = ? AND is_used = 0",
+        adapt_query("UPDATE otp_verification SET is_used = 1 WHERE email = ? AND is_used = 0"),
         (email,)
     )
 
@@ -148,11 +157,11 @@ def store_otp(email, otp_code):
     otp_hash = hash_otp(otp_code)
 
     # Schema uses code_hash (not otp_code), plus attempts/max_attempts/last_sent_at
-    cursor.execute("""
+    cursor.execute(adapt_query("""
         INSERT INTO otp_verification
             (email, code_hash, created_at, expires_at, attempts, max_attempts, last_sent_at, is_used)
         VALUES (?, ?, ?, ?, 0, 5, ?, 0)
-    """, (email, otp_hash, now, expires_at, now))
+    """), (email, otp_hash, now, expires_at, now))
 
     conn.commit()
     conn.close()
@@ -160,23 +169,22 @@ def store_otp(email, otp_code):
 
 def verify_otp(email, otp_code):
     """
-    Verify OTP code for email against the unified auth database.
+    Verify OTP code for email against the database.
     Matches against the code_hash column (SHA-256 of the plain OTP).
     Returns (is_valid: bool, message: str).
     """
-    os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(AUTH_DB_PATH)
+    conn = get_db_connection('students')
     cursor = conn.cursor()
 
     otp_hash = hash_otp(otp_code)
 
     # Primary lookup using hashed code (code_hash column)
-    cursor.execute("""
+    cursor.execute(adapt_query("""
         SELECT id, expires_at, attempts, max_attempts FROM otp_verification
         WHERE email = ? AND code_hash = ? AND is_used = 0
         ORDER BY created_at DESC
         LIMIT 1
-    """, (email, otp_hash))
+    """), (email, otp_hash))
 
     result = cursor.fetchone()
 
@@ -205,7 +213,7 @@ def verify_otp(email, otp_code):
         return False, 'OTP has expired. Please request a new one.'
 
     # Mark OTP as used
-    cursor.execute("UPDATE otp_verification SET is_used = 1 WHERE id = ?", (otp_id,))
+    cursor.execute(adapt_query("UPDATE otp_verification SET is_used = 1 WHERE id = ?"), (otp_id,))
     conn.commit()
     conn.close()
     return True, 'OTP verified successfully.'
@@ -383,15 +391,7 @@ def validate_faculty_email(email):
 
 def log_auth_event(email, event_type, success=True, details='', req=None):
     """
-    Log an authentication event to the auth_events table in AUTH_DB_PATH.
-    Gracefully fails if the table doesn't exist yet.
-
-    Args:
-        email (str): User email involved in the event
-        event_type (str): e.g. 'register', 'login_success', 'login_fail', 'otp_send'
-        success (bool): Whether the event was successful
-        details (str): Additional details for debugging
-        req: Flask request object (for IP / User-Agent logging), optional
+    Log an authentication event to the database.
     """
     try:
         ip_address = ''
@@ -403,34 +403,34 @@ def log_auth_event(email, event_type, success=True, details='', req=None):
             except Exception:
                 pass
 
-        os.makedirs(os.path.dirname(AUTH_DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(AUTH_DB_PATH)
+        # Use centralized connection
+        conn = get_db_connection('students')
         cursor = conn.cursor()
 
-        # Create the table if it doesn't exist (non-destructive migration)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS auth_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                success INTEGER DEFAULT 1,
-                details TEXT DEFAULT '',
-                ip_address TEXT DEFAULT '',
-                user_agent TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        # Create the table if it doesn't exist (only for local SQLite fallback)
+        if not is_postgres():
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS auth_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    success INTEGER DEFAULT 1,
+                    details TEXT DEFAULT '',
+                    ip_address TEXT DEFAULT '',
+                    user_agent TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        cursor.execute("""
+        cursor.execute(adapt_query("""
             INSERT INTO auth_events
                 (email, event_type, success, details, ip_address, user_agent, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (email, event_type, int(success), str(details), ip_address, user_agent, datetime.utcnow()))
+        """), (email, event_type, int(success), str(details), ip_address, user_agent, datetime.utcnow()))
 
         conn.commit()
         conn.close()
     except Exception as log_err:
-        # Never let logging failures crash the main request
         print(f"[WARN] log_auth_event failed: {log_err}")
 
 
@@ -438,30 +438,27 @@ def log_auth_event(email, event_type, success=True, details='', req=None):
 # Activity Logging
 # ============================================
 
-def log_student_activity(student_email, action_type, description, db_path: Optional[str] = None):
+def log_student_activity(student_email, action_type, description):
     """Log student activity for recent actions display."""
-    if db_path is None:
-        db_path = AUTH_DB_PATH
-
     try:
-        conn = sqlite3.connect(db_path)
+        conn = get_db_connection('students')
         cursor = conn.cursor()
 
-        # Create the table if it doesn't exist (migration-safe)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS student_activity (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_email TEXT NOT NULL,
-                action_type TEXT NOT NULL,
-                action_description TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        if not is_postgres():
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS student_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_email TEXT NOT NULL,
+                    action_type TEXT NOT NULL,
+                    action_description TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-        cursor.execute("""
+        cursor.execute(adapt_query("""
             INSERT INTO student_activity (student_email, action_type, action_description, created_at)
             VALUES (?, ?, ?, ?)
-        """, (student_email, action_type, description, datetime.utcnow()))
+        """), (student_email, action_type, description, datetime.utcnow()))
 
         conn.commit()
         conn.close()
@@ -469,23 +466,36 @@ def log_student_activity(student_email, action_type, description, db_path: Optio
         print(f"[WARN] log_student_activity failed: {e}")
 
 
-def get_recent_activity(student_email, limit=5, db_path=None):
+def get_recent_activity(student_email, limit=5):
     """Get recent activity for a student."""
-    if db_path is None:
-        db_path = AUTH_DB_PATH
-
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT action_type, action_description, created_at
-            FROM student_activity
-            WHERE student_email = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (student_email, limit))
+        # Use our wrapper to get dict-like results on both backends
+        from core.db_config import db_cursor
+        with db_cursor('students', dict_cursor=True) as cursor:
+            cursor.execute(adapt_query("""
+                SELECT action_type, action_description, created_at
+                FROM student_activity
+                WHERE student_email = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """), (student_email, limit))
+            
+            rows = cursor.fetchall()
+            activities = []
+            for row in rows:
+                if is_postgres():
+                    activities.append({
+                        'type': row['action_type'],
+                        'description': row['action_description'],
+                        'timestamp': row['created_at']
+                    })
+                else:
+                    activities.append({
+                        'type': row['action_type'],
+                        'description': row['action_description'],
+                        'timestamp': row['created_at']
+                    })
+            return activities
 
         activities = []
         for row in cursor.fetchall():
@@ -558,29 +568,23 @@ def require_auth(allowed_roles=None, require_admin=False):
 # ============================================
 
 def init_auth_database(db_path=None):
-    """
-    Initialise the unified authentication database with all required tables.
-    This is non-destructive — it only creates tables that don't already exist.
-
-    Tables created:
-        users           — primary user accounts (students + faculty + admin)
-        students        — student profile details
-        faculty_profiles — faculty profile details
-        otp_verification — OTP codes for email verification
-        auth_events      — audit log for auth events
-        student_activity — activity log for student dashboard
-        daily_usage      — daily usage tracking for rate enforcement
-    """
+    """Initialise production or local tables"""
     if db_path is None:
         db_path = AUTH_DB_PATH
 
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    if not is_postgres():
+        try:
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        except OSError:
+            pass
+
+    conn = get_db_connection('students')
     cursor = conn.cursor()
 
-    # Enable WAL mode for better concurrent performance
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("PRAGMA foreign_keys=ON;")
+    if not is_postgres():
+        # Enable WAL mode for better concurrent performance
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA foreign_keys=ON;")
 
     # --- Core user account table ---
     cursor.execute("""
@@ -744,33 +748,34 @@ def _migrate_columns(cursor):
 
 
 def _create_external_indexes():
-    """Create indexes on tickets.db and email_requests.db for query performance."""
-    try:
-        conn = sqlite3.connect('data/tickets.db')
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_student_email ON tickets(student_email)")
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass  # DB may not exist yet
+    """Create indexes for query performance (SQLite only)."""
+    if is_postgres():
+        return
 
-    try:
-        conn = sqlite3.connect('data/email_requests.db')
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_email_requests_student_email ON email_requests(student_email)"
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass  # DB may not exist yet
+    # Only attempt if not on a read-only filesystem
+    for db_name in ['tickets', 'email_requests']:
+        try:
+            conn = get_db_connection(db_name)
+            if db_name == 'tickets':
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_student_email ON tickets(student_email)")
+            else:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_email_requests_student_email ON email_requests(student_email)")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
 
 def init_faculty_database(db_path=None):
     """
-    Compatibility shim — faculty profiles are now stored in the unified
-    auth database (AUTH_DB_PATH). This function delegates to init_auth_database
-    so that any existing calls from app.py continue to work unchanged.
+    Compatibility shim for faculty profiles.
     """
-    # The old faculty.db still gets its OTP table for legacy compatibility
+    if is_postgres():
+        # Faculty profiles are in the unified Postgres database
+        init_auth_database()
+        return
+
+    # Local SQLite fallback
     old_faculty_db = 'data/faculty.db'
     try:
         os.makedirs('data', exist_ok=True)
@@ -791,6 +796,5 @@ def init_faculty_database(db_path=None):
     except Exception:
         pass
 
-    # Faculty profiles are now in the unified auth DB — ensure it's up to date
     init_auth_database(AUTH_DB_PATH)
     print("[OK] Faculty auth database initialised.")

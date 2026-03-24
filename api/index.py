@@ -71,10 +71,19 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Initialize authentication database (only creates tables if missing, non-destructive)
-print("\n[INFO] Checking Authentication System...")
-init_auth_database()
-init_faculty_database()
+# Initialize database systems
+# CRITICAL: On Vercel, the filesystem is READ-ONLY. 
+# We must skip SQLite initialization if we are using the cloud Postgres backend.
+if not is_postgres():
+    print("\n[INFO] Checking Local Authentication System...")
+    try:
+        init_auth_database()
+        init_faculty_database()
+        print("[OK] Local SQLite databases initialized.")
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize local SQLite: {e}")
+else:
+    print("\n[INFO] Using Cloud Database (Postgres). Skipping local SQLite initialization.")
 
 # Initialize orchestrator (creates all agents internally — FAQAgent, EmailAgent, TicketAgent)
 # This is the single point of initialization to avoid duplicate ML model loads
@@ -98,7 +107,12 @@ faq_agent = orchestrator_agent.faq_agent
 
 # Initialize faculty contact system
 print("\n[INFO] Initializing Faculty Contact System...")
-faculty_db = init_faculty_db()
+if not is_postgres():
+    faculty_db = init_faculty_db()
+else:
+    # In Postgres mode, the FacultyDatabase class should handle its own connection
+    from agents.faculty_db import FacultyDatabase
+    faculty_db = FacultyDatabase()
 
 # Initialize email request service for faculty email routes
 from agents.email_request_service import EmailRequestService
@@ -152,17 +166,17 @@ def register_user():
             }), 429
 
         # Check if email already exists in users table
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, email_verified FROM users WHERE email = ?", (email,))
-        existing_user = cursor.fetchone()
+        with db_connection('students') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT id, email_verified FROM users WHERE email = ?"), (email,))
+            existing_user = cursor.fetchone()
         is_reregistration = False
         if existing_user:
             existing_user_id = existing_user[0]
             # Allow re-registration: update the password for the existing seeded account
             # This lets users who were pre-seeded set their own password
             password_hash = hash_password(password)
-            cursor.execute("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?",
+            cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?"),
                            (password_hash, existing_user_id))
             is_reregistration = True
 
@@ -181,7 +195,6 @@ def register_user():
             # Validate roll number
             rn_valid, rn_error = validate_roll_number(roll_number)
             if not rn_valid:
-                conn.close()
                 return jsonify({'success': False, 'error': rn_error}), 400
 
             # Validate department
@@ -196,44 +209,46 @@ def register_user():
                 if year not in VALID_YEARS:
                     raise ValueError
             except (ValueError, TypeError):
-                conn.close()
                 return jsonify({'success': False, 'error': 'Year must be 1, 2, 3, or 4'}), 400
 
             # Validate section
             sec_valid, sec_error = validate_section(section)
             if not sec_valid:
-                conn.close()
                 return jsonify({'success': False, 'error': sec_error}), 400
 
             # Check duplicate roll number (skip for re-registration — the roll belongs to this user)
             if not is_reregistration:
-                cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+                cursor.execute(adapt_query("SELECT id FROM students WHERE roll_number = ?"), (roll_number,))
                 if cursor.fetchone():
-                    conn.close()
                     return jsonify({'success': False, 'error': 'This roll number is already registered.'}), 400
 
             if is_reregistration:
                 # Update existing student profile (password already updated above)
                 user_id = existing_user_id
-                cursor.execute("""
+                cursor.execute(adapt_query("""
                     UPDATE students SET full_name = ?, department = ?, year = ?, section = ?
                     WHERE user_id = ?
-                """, (full_name, department, year, section, user_id))
+                """), (full_name, department, year, section, user_id))
             else:
                 # --- Insert new student ---
                 password_hash = hash_password(password)
 
-                cursor.execute("""
+                cursor.execute(adapt_query("""
                     INSERT INTO users (role, email, password_hash, email_verified, created_at)
                     VALUES ('student', ?, ?, 0, ?)
-                """, (email, password_hash, datetime.utcnow()))
+                """), (email, password_hash, datetime.utcnow()))
                 user_id = cursor.lastrowid
 
-                cursor.execute("""
+                # Handle SERIAL vs lastrowid
+                if not user_id and is_postgres():
+                    cursor.execute("SELECT LASTVAL()")
+                    user_id = cursor.fetchone()[0]
+
+                cursor.execute(adapt_query("""
                     INSERT INTO students (user_id, email, roll_number, full_name, password_hash,
                                           department, year, section, is_verified, created_at)
                     VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
-                """, (user_id, email, roll_number, full_name, department, year, section, datetime.utcnow()))
+                """), (user_id, email, roll_number, full_name, department, year, section, datetime.utcnow()))
 
             conn.commit()
             conn.close()
@@ -256,7 +271,6 @@ def register_user():
             # Validate faculty email domain
             fe_valid, fe_error = validate_faculty_email(email)
             if not fe_valid:
-                conn.close()
                 return jsonify({'success': False, 'error': fe_error}), 400
 
             # Validate department
@@ -267,34 +281,38 @@ def register_user():
 
             # Check duplicate employee_id if provided (skip for re-registration)
             if employee_id and not is_reregistration:
-                cursor.execute("SELECT id FROM faculty_profiles WHERE employee_id = ?", (employee_id,))
+                cursor.execute(adapt_query("SELECT id FROM faculty_profiles WHERE employee_id = ?"), (employee_id,))
                 if cursor.fetchone():
-                    conn.close()
                     return jsonify({'success': False, 'error': 'This employee ID is already registered.'}), 400
 
             if is_reregistration:
                 # Update existing faculty profile (password already updated above)
                 user_id = existing_user_id
-                cursor.execute("""
+                cursor.execute(adapt_query("""
                     UPDATE faculty_profiles SET full_name = ?, department = ?,
                            designation = ?, subject_incharge = ?, class_incharge = ?
                     WHERE user_id = ?
-                """, (full_name, department, designation, subject_incharge, class_incharge, user_id))
+                """), (full_name, department, designation, subject_incharge, class_incharge, user_id))
             else:
                 # --- Insert new faculty ---
                 password_hash = hash_password(password)
 
-                cursor.execute("""
+                cursor.execute(adapt_query("""
                     INSERT INTO users (role, email, password_hash, email_verified, created_at)
                     VALUES ('faculty', ?, ?, 0, ?)
-                """, (email, password_hash, datetime.utcnow()))
+                """), (email, password_hash, datetime.utcnow()))
                 user_id = cursor.lastrowid
 
-                cursor.execute("""
+                # Handle SERIAL vs lastrowid
+                if not user_id and is_postgres():
+                    cursor.execute("SELECT LASTVAL()")
+                    user_id = cursor.fetchone()[0]
+
+                cursor.execute(adapt_query("""
                     INSERT INTO faculty_profiles (user_id, full_name, employee_id, department,
                                                   designation, subject_incharge, class_incharge, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (user_id, full_name, employee_id or None, department,
+                """), (user_id, full_name, employee_id or None, department,
                       designation, subject_incharge, class_incharge, datetime.utcnow()))
 
             conn.commit()
@@ -362,11 +380,10 @@ def send_otp_endpoint():
         }
 
         # Check if user exists
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, email_verified FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
-        conn.close()
+        with db_connection('students') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT id, email_verified FROM users WHERE email = ?"), (email,))
+            user = cursor.fetchone()
 
         if not user:
             # Don't reveal that the account doesn't exist
@@ -459,13 +476,13 @@ def verify_otp_endpoint():
             return jsonify({'success': False, 'error': message}), 400
 
         # Mark email as verified in users table
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET email_verified = 1 WHERE email = ?", (email,))
+        with db_connection('students') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("UPDATE users SET email_verified = 1 WHERE email = ?"), (email,))
 
-        # Get user info
-        cursor.execute("SELECT id, role, email FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
+            # Get user info
+            cursor.execute(adapt_query("SELECT id, role, email FROM users WHERE email = ?"), (email,))
+            user = cursor.fetchone()
 
         if not user:
             conn.close()
@@ -478,11 +495,11 @@ def verify_otp_endpoint():
 
         if role == 'student':
             # Also mark students table
-            cursor.execute("UPDATE students SET is_verified = 1 WHERE user_id = ?", (user_id,))
-            cursor.execute("""
+            cursor.execute(adapt_query("UPDATE students SET is_verified = 1 WHERE user_id = ?"), (user_id,))
+            cursor.execute(adapt_query("""
                 SELECT roll_number, full_name, department, year, section
                 FROM students WHERE user_id = ?
-            """, (user_id,))
+            """), (user_id,))
             student = cursor.fetchone()
             if student:
                 user_response.update({
@@ -558,17 +575,16 @@ def login_user():
             }), 429
 
         # Look up user by email
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, 0), COALESCE(is_active, 1)
-            FROM users
-            WHERE email = ?
-        """, (email,))
-        user = cursor.fetchone()
+        with db_connection('students') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, 0), COALESCE(is_active, 1)
+                FROM users
+                WHERE email = ?
+            """), (email,))
+            user = cursor.fetchone()
 
         if not user:
-            conn.close()
             log_auth_event(email, 'login_fail', success=False, details='User not found', req=request)
             return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
@@ -576,13 +592,11 @@ def login_user():
 
         # Check account active
         if not is_active_flag:
-            conn.close()
             log_auth_event(email, 'login_fail', success=False, details='Account deactivated', req=request)
             return jsonify({'success': False, 'error': 'Your account has been deactivated. Please contact admin.'}), 403
 
         # Check email verification
         if not email_verified:
-            conn.close()
             log_auth_event(email, 'login_fail', success=False, details='Email not verified', req=request)
             return jsonify({
                 'success': False,
@@ -593,13 +607,11 @@ def login_user():
 
         # Enforce that user has registered and set a password
         if not password_hash:
-            conn.close()
             log_auth_event(email, 'login_fail', success=False, details='Password not registered', req=request)
             return jsonify({'success': False, 'error': 'Account not registered. Please register first to set your password.'}), 403
 
         # Verify password
         if not verify_password(password_hash, password):
-            conn.close()
             log_auth_event(email, 'login_fail', success=False, details='Wrong password', req=request)
             return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
@@ -607,10 +619,10 @@ def login_user():
         user_response = {'id': user_id, 'email': user_email, 'role': role}
 
         if role == 'student':
-            cursor.execute("""
+            cursor.execute(adapt_query("""
                 SELECT roll_number, full_name, department, year, section, phone
                 FROM students WHERE user_id = ?
-            """, (user_id,))
+            """), (user_id,))
             student = cursor.fetchone()
             if student:
                 user_response.update({
@@ -623,14 +635,14 @@ def login_user():
                 })
 
             # Update last login in students table
-            cursor.execute("UPDATE students SET last_login = ? WHERE user_id = ?",
+            cursor.execute(adapt_query("UPDATE students SET last_login = ? WHERE user_id = ?"),
                           (datetime.utcnow(), user_id))
 
         elif role == 'faculty':
-            cursor.execute("""
+            cursor.execute(adapt_query("""
                 SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge, timetable
                 FROM faculty_profiles WHERE user_id = ?
-            """, (user_id,))
+            """), (user_id,))
             faculty = cursor.fetchone()
             if faculty:
                 user_response.update({
@@ -720,10 +732,10 @@ def change_password():
             return jsonify({'success': False, 'error': pw_error}), 400
 
         # Fetch current password hash
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
+        with db_connection('students') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT password_hash FROM users WHERE id = ?"), (user_id,))
+            user = cursor.fetchone()
 
         if not user:
             conn.close()
@@ -737,7 +749,7 @@ def change_password():
 
         # Update password
         new_hash = hash_password(new_password)
-        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        cursor.execute(adapt_query("UPDATE users SET password_hash = ? WHERE id = ?"), (new_hash, user_id))
         conn.commit()
         conn.close()
 
@@ -762,102 +774,98 @@ def get_current_user():
         role = user_data.get('role')
         email = user_data.get('email')
 
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students', dict_cursor=True) as cursor:
+            if role == 'student':
+                cursor.execute(adapt_query("""
+                    SELECT s.id, s.email, s.roll_number, s.full_name, s.department,
+                           s.year, s.section, s.phone, s.profile_photo,
+                           s.is_verified, s.created_at, s.last_login
+                    FROM students s
+                    JOIN users u ON s.user_id = u.id
+                    WHERE u.email = ?
+                """), (email,))
+                student = cursor.fetchone()
 
-        if role == 'student':
-            cursor.execute("""
-                SELECT s.id, s.email, s.roll_number, s.full_name, s.department,
-                       s.year, s.section, s.phone, s.profile_photo,
-                       s.is_verified, s.created_at, s.last_login
-                FROM students s
-                JOIN users u ON s.user_id = u.id
-                WHERE u.email = ?
-            """, (email,))
-            student = cursor.fetchone()
-            conn.close()
+                if not student:
+                    return jsonify({'error': 'User not found'}), 404
 
-            if not student:
-                return jsonify({'error': 'User not found'}), 404
+                import time as _time
+                photo_path = student['profile_photo']
+                photo_url = None
+                if photo_path:
+                    full_path = os.path.join('static', photo_path)
+                    if os.path.exists(full_path):
+                        photo_url = f"/static/{photo_path}?v={int(_time.time())}"
 
-            import time as _time
-            photo_path = student['profile_photo']
-            photo_url = None
-            if photo_path:
-                full_path = os.path.join('static', photo_path)
-                if os.path.exists(full_path):
-                    photo_url = f"/static/{photo_path}?v={int(_time.time())}"
+                return jsonify({
+                    'success': True,
+                    'user': {
+                        'id': student['id'],
+                        'email': student['email'],
+                        'roll_number': student['roll_number'],
+                        'full_name': student['full_name'],
+                        'department': student['department'],
+                        'year': student['year'],
+                        'section': student['section'],
+                        'phone': student['phone'] or '',
+                        'profile_photo': photo_url,
+                        'role': 'student'
+                    }
+                })
 
-            return jsonify({
-                'success': True,
-                'user': {
-                    'id': student['id'],
-                    'email': student['email'],
-                    'roll_number': student['roll_number'],
-                    'full_name': student['full_name'],
-                    'department': student['department'],
-                    'year': student['year'],
-                    'section': student['section'],
-                    'phone': student['phone'] or '',
-                    'profile_photo': photo_url,
-                    'role': 'student'
-                }
-            })
+            elif role == 'faculty':
+                cursor.execute(adapt_query("""
+                    SELECT fp.full_name, fp.employee_id, fp.department,
+                           fp.designation, fp.subject_incharge, fp.class_incharge,
+                           fp.phone, fp.profile_photo, fp.office_room, fp.bio,
+                           fp.linkedin, fp.github, fp.researchgate, fp.timetable,
+                           u.email, u.id
+                    FROM faculty_profiles fp
+                    JOIN users u ON fp.user_id = u.id
+                    WHERE u.email = ?
+                """), (email,))
+                faculty = cursor.fetchone()
 
-        elif role == 'faculty':
-            cursor.execute("""
-                SELECT fp.full_name, fp.employee_id, fp.department,
-                       fp.designation, fp.subject_incharge, fp.class_incharge,
-                       fp.phone, fp.profile_photo, fp.office_room, fp.bio,
-                       fp.linkedin, fp.github, fp.researchgate, fp.timetable,
-                       u.email, u.id
-                FROM faculty_profiles fp
-                JOIN users u ON fp.user_id = u.id
-                WHERE u.email = ?
-            """, (email,))
-            faculty = cursor.fetchone()
-            conn.close()
+                if not faculty:
+                    return jsonify({'error': 'User not found'}), 404
 
-            if not faculty:
-                return jsonify({'error': 'User not found'}), 404
+                import time as _time
+                photo_path = faculty['profile_photo']
+                photo_url = None
+                if photo_path:
+                    full_path = os.path.join('static', photo_path)
+                    if os.path.exists(full_path):
+                        photo_url = f"/static/{photo_path}?v={int(_time.time())}"
 
-            import time as _time
-            photo_path = faculty['profile_photo']
-            photo_url = None
-            if photo_path:
-                full_path = os.path.join('static', photo_path)
-                if os.path.exists(full_path):
-                    photo_url = f"/static/{photo_path}?v={int(_time.time())}"
-
-            return jsonify({
-                'success': True,
-                'user': {
-                    'id': faculty['id'],
-                    'email': faculty['email'],
-                    'name': faculty['full_name'],
-                    'full_name': faculty['full_name'],
-                    'employee_id': faculty['employee_id'] or '',
-                    'department': faculty['department'],
-                    'designation': faculty['designation'] or '',
-                    'subject_incharge': faculty['subject_incharge'] or '',
-                    'class_incharge': faculty['class_incharge'] or '',
-                    'phone': faculty['phone'] or '',
-                    'profile_photo': photo_url,
-                    'office_room': faculty['office_room'] or '',
-                    'bio': faculty['bio'] or '',
-                    'linkedin': faculty['linkedin'] or '',
-                    'github': faculty['github'] or '',
-                    'researchgate': faculty['researchgate'] or '',
-                    'timetable': faculty['timetable'] or '{}',
-                    'role': 'faculty'
-                }
-            })
-
-        else:
-            return jsonify({'error': 'Invalid user role'}), 400
+                return jsonify({
+                    'success': True,
+                    'user': {
+                        'id': faculty['id'],
+                        'email': faculty['email'],
+                        'name': faculty['full_name'],
+                        'full_name': faculty['full_name'],
+                        'employee_id': faculty['employee_id'] or '',
+                        'department': faculty['department'],
+                        'designation': faculty['designation'] or '',
+                        'subject_incharge': faculty['subject_incharge'] or '',
+                        'class_incharge': faculty['class_incharge'] or '',
+                        'phone': faculty['phone'] or '',
+                        'profile_photo': photo_url,
+                        'office_room': faculty['office_room'] or '',
+                        'bio': faculty['bio'] or '',
+                        'linkedin': faculty['linkedin'] or '',
+                        'github': faculty['github'] or '',
+                        'researchgate': faculty['researchgate'] or '',
+                        'timetable': faculty['timetable'] or '{}',
+                        'role': 'faculty'
+                    }
+                })
+            else:
+                return jsonify({'error': 'Invalid user role'}), 400
 
     except Exception as e:
+        print(f"[ERROR] get_current_user error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -1068,20 +1076,18 @@ def get_faculty_dashboard():
             day_tickets = 0
             day_emails = 0
             try:
-                t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-                tc = t_conn.cursor()
-                tc.execute("SELECT COUNT(*) FROM tickets WHERE DATE(created_at) = ?", (d,))
-                day_tickets = tc.fetchone()[0]
-                t_conn.close()
+                with db_connection('tickets') as t_conn:
+                    tc = t_conn.cursor()
+                    tc.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE DATE(created_at) = ?"), (d,))
+                    day_tickets = tc.fetchone()[0]
             except:
                 pass
             try:
-                e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-                ec = e_conn.cursor()
-                ec.execute("SELECT COUNT(*) FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?",
-                            (f"%{full_name.lower()}%", d))
-                day_emails = ec.fetchone()[0]
-                e_conn.close()
+                with db_connection('faculty_data') as e_conn:
+                    ec = e_conn.cursor()
+                    ec.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?"),
+                                (f"%{full_name.lower()}%", d))
+                    day_emails = ec.fetchone()[0]
             except:
                 pass
             trend.append({'date': d, 'tickets': day_tickets, 'emails': day_emails})
@@ -1089,26 +1095,24 @@ def get_faculty_dashboard():
         # --- Recent Activity ---
         recent_tickets = []
         try:
-            t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
-            tc.execute("SELECT ticket_id, student_email, category, sub_category, priority, status, created_at FROM tickets ORDER BY created_at DESC LIMIT 5")
-            for r in tc.fetchall():
-                recent_tickets.append(dict(r))
-            t_conn.close()
+            with db_connection('tickets') as t_conn:
+                t_conn.row_factory = sqlite3.Row
+                tc = t_conn.cursor()
+                tc.execute(adapt_query("SELECT ticket_id, student_email, category, sub_category, priority, status, created_at FROM tickets ORDER BY created_at DESC LIMIT 5"))
+                for r in tc.fetchall():
+                    recent_tickets.append(dict(r))
         except Exception as rte:
             print(f"[DASHBOARD] Recent tickets error: {rte}")
 
         recent_emails = []
         try:
-            e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-            e_conn.row_factory = sqlite3.Row
-            ec = e_conn.cursor()
-            ec.execute("SELECT student_name, student_email, subject, status, timestamp FROM email_requests WHERE LOWER(faculty_name) LIKE ? ORDER BY timestamp DESC LIMIT 5",
-                        (f"%{full_name.lower()}%",))
-            for r in ec.fetchall():
-                recent_emails.append(dict(r))
-            e_conn.close()
+            with db_connection('faculty_data') as e_conn:
+                e_conn.row_factory = sqlite3.Row
+                ec = e_conn.cursor()
+                ec.execute(adapt_query("SELECT student_name, student_email, subject, status, timestamp FROM email_requests WHERE LOWER(faculty_name) LIKE ? ORDER BY timestamp DESC LIMIT 5"),
+                            (f"%{full_name.lower()}%",))
+                for r in ec.fetchall():
+                    recent_emails.append(dict(r))
         except Exception as ree:
             print(f"[DASHBOARD] Recent emails error: {ree}")
 
@@ -1116,18 +1120,17 @@ def get_faculty_dashboard():
         timetable = {}
         try:
             import json as json_mod
-            s_conn = sqlite3.connect('data/students.db', timeout=10)
-            sc = s_conn.cursor()
-            sc.execute("""
-                SELECT fp.timetable 
-                FROM faculty_profiles fp 
-                JOIN users u ON fp.user_id = u.id 
-                WHERE u.email = ?
-            """, (email,))
-            row = sc.fetchone()
-            if row and row[0]:
-                timetable = json_mod.loads(row[0]) if isinstance(row[0], str) else row[0]
-            s_conn.close()
+            with db_connection('students') as s_conn:
+                sc = s_conn.cursor()
+                sc.execute(adapt_query("""
+                    SELECT fp.timetable 
+                    FROM faculty_profiles fp 
+                    JOIN users u ON fp.user_id = u.id 
+                    WHERE u.email = ?
+                """), (email,))
+                row = sc.fetchone()
+                if row and row[0]:
+                    timetable = json_mod.loads(row[0]) if isinstance(row[0], str) else row[0]
         except Exception as tte:
             print(f"[DASHBOARD] Timetable error: {tte}")
 
@@ -1420,41 +1423,39 @@ def get_faculty_tickets():
         email = request.current_user.get('email')
         
         # Get faculty department
-        s_conn = sqlite3.connect('data/students.db', timeout=10)
-        sc = s_conn.cursor()
-        sc.execute("""
-            SELECT fp.department 
-            FROM faculty_profiles fp 
-            JOIN users u ON u.id = fp.user_id 
-            WHERE u.email = ?
-        """, (email,))
-        row = sc.fetchone()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("""
+                SELECT fp.department 
+                FROM faculty_profiles fp 
+                JOIN users u ON u.id = fp.user_id 
+                WHERE u.email = ?
+            """), (email,))
+            row = sc.fetchone()
         
         if not row or not row[0]:
-            s_conn.close()
             return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
             
         department = row[0]
         
         # Get all students in this faculty's department
-        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
-        student_emails = [r[0] for r in sc.fetchall()]
-        s_conn.close()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
+            student_emails = [r[0] for r in sc.fetchall()]
         
         # Get tickets for these students
-        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-        t_conn.row_factory = sqlite3.Row
-        tc = t_conn.cursor()
-        
-        if student_emails:
-            placeholders = ','.join(['?'] * len(student_emails))
-            tc.execute(f"SELECT * FROM tickets WHERE student_email IN ({placeholders}) ORDER BY created_at DESC", student_emails)
-            tickets = [dict(r) for r in tc.fetchall()]
-        else:
-            tickets = []
+        with db_connection('tickets') as t_conn:
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
             
-        t_conn.close()
-        
+            if student_emails:
+                placeholders = ','.join(['?'] * len(student_emails))
+                tc.execute(adapt_query(f"SELECT * FROM tickets WHERE student_email IN ({placeholders}) ORDER BY created_at DESC"), student_emails)
+                tickets = [dict(r) for r in tc.fetchall()]
+            else:
+                tickets = []
+            
         return jsonify({'success': True, 'tickets': tickets, 'department': department})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1467,33 +1468,32 @@ def get_faculty_ticket_detail(ticket_id):
     try:
         email = request.current_user.get('email')
         
-        s_conn = sqlite3.connect('data/students.db', timeout=10)
-        sc = s_conn.cursor()
-        sc.execute("""
-            SELECT fp.department 
-            FROM faculty_profiles fp 
-            JOIN users u ON u.id = fp.user_id 
-            WHERE u.email = ?
-        """, (email,))
-        row = sc.fetchone()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("""
+                SELECT fp.department 
+                FROM faculty_profiles fp 
+                JOIN users u ON u.id = fp.user_id 
+                WHERE u.email = ?
+            """), (email,))
+            row = sc.fetchone()
         
         if not row or not row[0]:
-            s_conn.close()
             return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
             
         department = row[0]
         
         # Verification: Does this ticket belong to a student in the faculty's department?
-        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
-        student_emails = [r[0] for r in sc.fetchall()]
-        s_conn.close()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
+            student_emails = [r[0] for r in sc.fetchall()]
         
-        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-        t_conn.row_factory = sqlite3.Row
-        tc = t_conn.cursor()
-        tc.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,))
-        ticket = tc.fetchone()
-        t_conn.close()
+        with db_connection('tickets') as t_conn:
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
+            tc.execute(adapt_query("SELECT * FROM tickets WHERE ticket_id = ?"), (ticket_id,))
+            ticket = tc.fetchone()
         
         if ticket and ticket['student_email'] not in student_emails:
             ticket = None # Deny access if student not in department
@@ -1520,55 +1520,53 @@ def resolve_faculty_ticket(ticket_id):
         if not resolution_note:
             return jsonify({'success': False, 'error': 'Resolution note is required'}), 400
             
-        s_conn = sqlite3.connect('data/students.db', timeout=10)
-        sc = s_conn.cursor()
-        sc.execute("""
-            SELECT fp.department 
-            FROM faculty_profiles fp 
-            JOIN users u ON u.id = fp.user_id 
-            WHERE u.email = ?
-        """, (email,))
-        row = sc.fetchone()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("""
+                SELECT fp.department 
+                FROM faculty_profiles fp 
+                JOIN users u ON u.id = fp.user_id 
+                WHERE u.email = ?
+            """), (email,))
+            row = sc.fetchone()
         
         if not row or not row[0]:
-            s_conn.close()
             return jsonify({'success': False, 'error': 'Faculty department not set'}), 400
             
         department = row[0]
         
         # Verification: Does this ticket belong to a student in the faculty's department?
-        sc.execute("SELECT email FROM students WHERE department = ?", (department,))
-        student_emails = [r[0] for r in sc.fetchall()]
-        s_conn.close()
+        with db_connection('students') as s_conn:
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
+            student_emails = [r[0] for r in sc.fetchall()]
         
-        t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-        t_conn.row_factory = sqlite3.Row
-        tc = t_conn.cursor()
-        
-        # Verify ownership
-        tc.execute("SELECT id, student_email FROM tickets WHERE ticket_id = ?", (ticket_id,))
-        ticket_row = tc.fetchone()
-        
-        if not ticket_row or ticket_row['student_email'] not in student_emails:
-            t_conn.close()
-            return jsonify({'success': False, 'error': 'Ticket not found or access denied'}), 404
+        with db_connection('tickets') as t_conn:
+            t_conn.row_factory = sqlite3.Row
+            tc = t_conn.cursor()
             
-        # Update ticket using UTC timestamp safely
-        from datetime import datetime
-        now = datetime.utcnow()
-        
-        tc.execute("""
-            UPDATE tickets 
-            SET status = 'Resolved',
-                updated_at = ?,
-                resolved_by = ?,
-                resolved_at = ?,
-                resolution_note = ?
-            WHERE ticket_id = ?
-        """, (now, faculty_id, now, resolution_note, ticket_id))
-        
-        t_conn.commit()
-        t_conn.close()
+            # Verify ownership
+            tc.execute(adapt_query("SELECT id, student_email FROM tickets WHERE ticket_id = ?"), (ticket_id,))
+            ticket_row = tc.fetchone()
+            
+            if not ticket_row or ticket_row['student_email'] not in student_emails:
+                return jsonify({'success': False, 'error': 'Ticket not found or access denied'}), 404
+                
+            # Update ticket using UTC timestamp safely
+            from datetime import datetime
+            now = datetime.utcnow()
+            
+            tc.execute(adapt_query("""
+                UPDATE tickets 
+                SET status = 'Resolved',
+                    updated_at = ?,
+                    resolved_by = ?,
+                    resolved_at = ?,
+                    resolution_note = ?
+                WHERE ticket_id = ?
+            """), (now, faculty_id, now, resolution_note, ticket_id))
+            
+            t_conn.commit()
         
         return jsonify({'success': True, 'message': 'Ticket resolved successfully'})
     except Exception as e:
@@ -1650,81 +1648,80 @@ def get_faculty_emails():
         full_name = request.current_user.get('full_name', '')
         filter_type = request.args.get('filter', 'all')  # all, pending, replied, sent
         
-        e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-        e_conn.row_factory = sqlite3.Row
-        ec = e_conn.cursor()
-        
-        all_emails = []
-        
-        # 1) Emails RECEIVED from students (student → faculty)
-        if filter_type in ('all', 'pending', 'replied'):
-            if filter_type == 'all':
-                # Current month only for 'all' filter
-                ec.execute("""
-                    SELECT id, student_email, student_name, student_roll_no, 
-                           student_department, student_year, faculty_name, subject, 
-                           message, status, timestamp, attachment_name
-                    FROM email_requests 
-                    WHERE LOWER(faculty_name) LIKE ?
-                      AND strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')
-                    ORDER BY timestamp DESC
-                """, (f"%{full_name.lower()}%",))
-            else:
-                status_filter = 'Replied' if filter_type == 'replied' else 'Sent'
-                ec.execute("""
-                    SELECT id, student_email, student_name, student_roll_no, 
-                           student_department, student_year, faculty_name, subject, 
-                           message, status, timestamp, attachment_name
-                    FROM email_requests 
-                    WHERE LOWER(faculty_name) LIKE ?
-                      AND status = ?
-                    ORDER BY timestamp DESC
-                """, (f"%{full_name.lower()}%", status_filter))
+        with db_connection('faculty_data') as e_conn:
+            e_conn.row_factory = sqlite3.Row
+            ec = e_conn.cursor()
             
-            for r in ec.fetchall():
-                row = dict(r)
-                row['direction'] = 'received'
-                all_emails.append(row)
-        
-        # 2) Emails SENT by faculty (faculty → student) — stored as faculty_sent_emails
-        if filter_type in ('all', 'sent'):
-            try:
-                ec.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='faculty_sent_emails'")
-                if ec.fetchone():
-                    if filter_type == 'all':
-                        ec.execute("""
-                            SELECT id, recipient_email as student_email, 
-                                   recipient_email as student_name,
-                                   '' as student_roll_no, '' as student_department, '' as student_year,
-                                   sender_name as faculty_name, subject, body as message, 
-                                   'Sent' as status, sent_at as timestamp, NULL as attachment_name
-                            FROM faculty_sent_emails
-                            WHERE LOWER(sender_email) = LOWER(?)
-                              AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')
-                            ORDER BY sent_at DESC
-                        """, (email,))
-                    else:
-                        ec.execute("""
-                            SELECT id, recipient_email as student_email, 
-                                   recipient_email as student_name,
-                                   '' as student_roll_no, '' as student_department, '' as student_year,
-                                   sender_name as faculty_name, subject, body as message, 
-                                   'Sent' as status, sent_at as timestamp, NULL as attachment_name
-                            FROM faculty_sent_emails
-                            WHERE LOWER(sender_email) = LOWER(?)
-                            ORDER BY sent_at DESC
-                        """, (email,))
-                    
-                    for r in ec.fetchall():
-                        row = dict(r)
-                        row['direction'] = 'sent'
-                        # Use negative ID offset to avoid collision with received email IDs
-                        row['id'] = -row['id']
-                        all_emails.append(row)
-            except Exception:
-                pass  # Table doesn't exist yet — that's fine
+            all_emails = []
+            
+            # 1) Emails RECEIVED from students (student → faculty)
+            if filter_type in ('all', 'pending', 'replied'):
+                if filter_type == 'all':
+                    # Current month only for 'all' filter
+                    ec.execute(adapt_query("""
+                        SELECT id, student_email, student_name, student_roll_no, 
+                               student_department, student_year, faculty_name, subject, 
+                               message, status, timestamp, attachment_name
+                        FROM email_requests 
+                        WHERE LOWER(faculty_name) LIKE ?
+                          AND strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')
+                        ORDER BY timestamp DESC
+                    """), (f"%{full_name.lower()}%",))
+                else:
+                    status_filter = 'Replied' if filter_type == 'replied' else 'Sent'
+                    ec.execute(adapt_query("""
+                        SELECT id, student_email, student_name, student_roll_no, 
+                               student_department, student_year, faculty_name, subject, 
+                               message, status, timestamp, attachment_name
+                        FROM email_requests 
+                        WHERE LOWER(faculty_name) LIKE ?
+                          AND status = ?
+                        ORDER BY timestamp DESC
+                    """), (f"%{full_name.lower()}%", status_filter))
+                
+                for r in ec.fetchall():
+                    row = dict(r)
+                    row['direction'] = 'received'
+                    all_emails.append(row)
+            
+            # 2) Emails SENT by faculty (faculty → student) — stored as faculty_sent_emails
+            if filter_type in ('all', 'sent'):
+                try:
+                    ec.execute(adapt_query("SELECT name FROM sqlite_master WHERE type='table' AND name='faculty_sent_emails'"))
+                    if ec.fetchone():
+                        if filter_type == 'all':
+                            ec.execute(adapt_query("""
+                                SELECT id, recipient_email as student_email, 
+                                       recipient_email as student_name,
+                                       '' as student_roll_no, '' as student_department, '' as student_year,
+                                       sender_name as faculty_name, subject, body as message, 
+                                       'Sent' as status, sent_at as timestamp, NULL as attachment_name
+                                FROM faculty_sent_emails
+                                WHERE LOWER(sender_email) = LOWER(?)
+                                  AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')
+                                ORDER BY sent_at DESC
+                            """), (email,))
+                        else:
+                            ec.execute(adapt_query("""
+                                SELECT id, recipient_email as student_email, 
+                                       recipient_email as student_name,
+                                       '' as student_roll_no, '' as student_department, '' as student_year,
+                                       sender_name as faculty_name, subject, body as message, 
+                                       'Sent' as status, sent_at as timestamp, NULL as attachment_name
+                                FROM faculty_sent_emails
+                                WHERE LOWER(sender_email) = LOWER(?)
+                                ORDER BY sent_at DESC
+                            """), (email,))
+                        
+                        for r in ec.fetchall():
+                            row = dict(r)
+                            row['direction'] = 'sent'
+                            # Use negative ID offset to avoid collision with received email IDs
+                            row['id'] = -row['id']
+                            all_emails.append(row)
+                except Exception:
+                    pass  # Table doesn't exist yet — that's fine
 
-        e_conn.close()
         
         # Sort all emails by timestamp descending
         all_emails.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
@@ -1742,14 +1739,13 @@ def get_faculty_email_detail(email_id):
         email = request.current_user.get('email')
         full_name = request.current_user.get('full_name', '')
         
-        e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-        e_conn.row_factory = sqlite3.Row
-        ec = e_conn.cursor()
-        
-        ec.execute("SELECT * FROM email_requests WHERE id = ? AND LOWER(faculty_name) LIKE ?", 
-                   (email_id, f"%{full_name.lower()}%"))
-        email_data = ec.fetchone()
-        e_conn.close()
+        with db_connection('faculty_data') as e_conn:
+            e_conn.row_factory = sqlite3.Row
+            ec = e_conn.cursor()
+            
+            ec.execute(adapt_query("SELECT * FROM email_requests WHERE id = ? AND LOWER(faculty_name) LIKE ?"), 
+                       (email_id, f"%{full_name.lower()}%"))
+            email_data = ec.fetchone()
         
         if not email_data:
             return jsonify({'success': False, 'error': 'Email not found or access denied'}), 404
@@ -1825,11 +1821,10 @@ def reply_faculty_email(email_id):
             # Optionally update status in email_requests to "Replied"
             if result.get('success'):
                 try:
-                    e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-                    ec = e_conn.cursor()
-                    ec.execute("UPDATE email_requests SET status = 'Replied' WHERE id = ?", (email_id,))
-                    e_conn.commit()
-                    e_conn.close()
+                    with db_connection('faculty_data') as e_conn:
+                        ec = e_conn.cursor()
+                        ec.execute(adapt_query("UPDATE email_requests SET status = 'Replied' WHERE id = ?"), (email_id,))
+                        e_conn.commit()
                 except Exception as db_err:
                     print(f"Failed to update email status: {db_err}")
             
@@ -2329,26 +2324,24 @@ def chat_orchestrator():
         
         # 3. Fallback for testing - use first student if still no user_id
         if not user_id:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM students LIMIT 1") # Get ID instead of email
-            result = cursor.fetchone()
-            conn.close()
-            user_id = result[0] if result else "test_user"
+            with db_connection('students') as conn:
+                cursor = conn.cursor()
+                cursor.execute(adapt_query("SELECT id FROM students LIMIT 1")) # Get ID instead of email
+                result = cursor.fetchone()
+                user_id = result[0] if result else "test_user"
         
         # Get student profile for context - checking both email and id
-        conn = sqlite3.connect('data/students.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Try finding by Roll Number first (since 22AG1A66A8 is a Roll Number)
-        cursor.execute("""
-            SELECT email, full_name, roll_number, department, year 
-            FROM students WHERE roll_number = ? OR email = ?
-        """, (user_id, user_id))
-        
-        student = cursor.fetchone()
-        conn.close()
+        with db_connection('students') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Try finding by Roll Number first (since 22AG1A66A8 is a Roll Number)
+            cursor.execute(adapt_query("""
+                SELECT email, full_name, roll_number, department, year 
+                FROM students WHERE roll_number = ? OR email = ?
+            """), (user_id, user_id))
+            
+            student = cursor.fetchone()
         
         student_profile = {
             "email": student["email"],
@@ -2401,12 +2394,11 @@ def confirm_chat_action():
         
         # Fallback
         if not user_id:
-            conn = sqlite3.connect('data/students.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT email FROM students LIMIT 1")
-            result = cursor.fetchone()
-            conn.close()
-            user_id = result[0] if result else "test@student.com"
+            with db_connection('students') as conn:
+                cursor = conn.cursor()
+                cursor.execute(adapt_query("SELECT email FROM students LIMIT 1"))
+                result = cursor.fetchone()
+                user_id = result[0] if result else "test@student.com"
         
         if not confirmed:
             # User cancelled
@@ -2417,15 +2409,14 @@ def confirm_chat_action():
             })
         
         # Get student profile
-        conn = sqlite3.connect('data/students.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT email, full_name, roll_number, department, year 
-            FROM students WHERE email = ?
-        """, (user_id,))
-        student = cursor.fetchone()
-        conn.close()
+        with db_connection('students') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT email, full_name, roll_number, department, year 
+                FROM students WHERE email = ?
+            """), (user_id,))
+            student = cursor.fetchone()
         
         student_profile = {
             "email": student["email"],
@@ -2551,20 +2542,19 @@ def faculty_chat_orchestrator():
         # Fetch full_name from faculty_profiles
         faculty_profile = {}
         try:
-            conn = sqlite3.connect('data/students.db', timeout=5)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT fp.full_name, fp.department, fp.designation, fp.employee_id
-                FROM faculty_profiles fp
-                JOIN users u ON u.id = fp.user_id
-                WHERE LOWER(u.email) = LOWER(?)
-                LIMIT 1
-            """, (faculty_email,))
-            row = cur.fetchone()
-            conn.close()
-            if row:
-                faculty_profile = dict(row)
+            with db_connection('students') as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute(adapt_query("""
+                    SELECT fp.full_name, fp.department, fp.designation, fp.employee_id
+                    FROM faculty_profiles fp
+                    JOIN users u ON u.id = fp.user_id
+                    WHERE LOWER(u.email) = LOWER(?)
+                    LIMIT 1
+                """), (faculty_email,))
+                row = cur.fetchone()
+                if row:
+                    faculty_profile = dict(row)
         except Exception as db_err:
             print(f'[FACULTY_CHAT] Profile fetch error: {type(db_err).__name__}')
 
@@ -2666,54 +2656,52 @@ def faculty_confirm_resolve():
 def admin_dashboard():
     """Admin dashboard: total users, tickets overview, last 10 system-wide activity rows."""
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM students")
-        total_students = cursor.fetchone()[0]
+            cursor.execute(adapt_query("SELECT COUNT(*) FROM students"))
+            total_students = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM faculty_profiles")
-        total_faculty = cursor.fetchone()[0]
+            cursor.execute(adapt_query("SELECT COUNT(*) FROM faculty_profiles"))
+            total_faculty = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(DISTINCT department) FROM students")
-        total_departments = cursor.fetchone()[0]
+            cursor.execute(adapt_query("SELECT COUNT(DISTINCT department) FROM students"))
+            total_departments = cursor.fetchone()[0]
 
-        # Last 10 student activities across all students
-        cursor.execute("""
-            SELECT student_email, action_type, action_description, created_at
-            FROM student_activity
-            ORDER BY created_at DESC
-            LIMIT 10
-        """)
-        activity_rows = cursor.fetchall()
-        recent_activity = []
-        for r in activity_rows:
-            # Parse action_description for extra details if possible
-            details = {}
-            desc = r[2] or ''
-            if 'category' in desc.lower():
-                details['category'] = desc
-            if 'ticket' in desc.lower():
-                details['ticket_id'] = desc
-            recent_activity.append({
-                'student_email': r[0],
-                'action_type': r[1],
-                'details': details,
-                'timestamp': r[3]
-            })
-        conn.close()
+            # Last 10 student activities across all students
+            cursor.execute(adapt_query("""
+                SELECT student_email, action_type, action_description, created_at
+                FROM student_activity
+                ORDER BY created_at DESC
+                LIMIT 10
+            """))
+            activity_rows = cursor.fetchall()
+            recent_activity = []
+            for r in activity_rows:
+                # Parse action_description for extra details if possible
+                details = {}
+                desc = r[2] or ''
+                if 'category' in desc.lower():
+                    details['category'] = desc
+                if 'ticket' in desc.lower():
+                    details['ticket_id'] = desc
+                recent_activity.append({
+                    'student_email': r[0],
+                    'action_type': r[1],
+                    'details': details,
+                    'timestamp': r[3]
+                })
 
         # Ticket counts
         open_tickets = 0
         resolved_tickets = 0
         try:
-            tconn = sqlite3.connect('data/tickets.db')
-            tcur = tconn.cursor()
-            tcur.execute("SELECT COUNT(*) FROM tickets WHERE status = 'Open'")
-            open_tickets = tcur.fetchone()[0]
-            tcur.execute("SELECT COUNT(*) FROM tickets WHERE status IN ('Resolved', 'Closed')")
-            resolved_tickets = tcur.fetchone()[0]
-            tconn.close()
+            with db_connection('tickets') as tconn:
+                tcur = tconn.cursor()
+                tcur.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE status = 'Open'"))
+                open_tickets = tcur.fetchone()[0]
+                tcur.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE status IN ('Resolved', 'Closed')"))
+                resolved_tickets = tcur.fetchone()[0]
         except Exception as te:
             print(f"[ADMIN] Ticket count error: {te}")
 
@@ -2737,53 +2725,52 @@ def admin_dashboard():
 def admin_ticket_trends():
     """Weekly ticket created vs resolved trends for the last 8 weeks."""
     try:
-        conn = sqlite3.connect('data/tickets.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with db_connection('tickets') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Pure SQLite approach: Generate last 8 weeks, LEFT JOIN with created and resolved counts.
-        # This completely avoids Python-SQLite strftime mismatches.
-        cursor.execute("""
-            WITH RECURSIVE weeks(start_date) AS (
-                -- Start exactly 7 weeks ago from the most recent Monday
-                SELECT date('now', 'localtime', 'weekday 1', '-49 days')
-                UNION ALL
-                SELECT date(start_date, '+7 days')
-                FROM weeks
-                WHERE start_date < date('now', 'localtime', 'weekday 1')
-            ),
-            created_counts AS (
-                SELECT date(created_at, 'weekday 1') as wk_start, COUNT(*) as c_count
-                FROM tickets
-                GROUP BY wk_start
-            ),
-            resolved_counts AS (
-                SELECT date(updated_at, 'weekday 1') as wk_start, COUNT(*) as r_count
-                FROM tickets
-                WHERE status IN ('Resolved', 'Closed')
-                GROUP BY wk_start
-            )
-            SELECT 
-                w.start_date,
-                COALESCE(c.c_count, 0) as created,
-                COALESCE(r.r_count, 0) as resolved
-            FROM weeks w
-            LEFT JOIN created_counts c ON w.start_date = c.wk_start
-            LEFT JOIN resolved_counts r ON w.start_date = r.wk_start
-            ORDER BY w.start_date ASC
-        """)
-        
-        weeks_data = []
-        for row in cursor.fetchall():
-            # Format display label (e.g., "Mar 02")
-            dt = datetime.strptime(row['start_date'], '%Y-%m-%d')
-            weeks_data.append({
-                'week': dt.strftime('%b %d'),
-                'created': row['created'],
-                'resolved': row['resolved']
-            })
+            # Pure SQLite approach: Generate last 8 weeks, LEFT JOIN with created and resolved counts.
+            # This completely avoids Python-SQLite strftime mismatches.
+            cursor.execute(adapt_query("""
+                WITH RECURSIVE weeks(start_date) AS (
+                    -- Start exactly 7 weeks ago from the most recent Monday
+                    SELECT date('now', 'localtime', 'weekday 1', '-49 days')
+                    UNION ALL
+                    SELECT date(start_date, '+7 days')
+                    FROM weeks
+                    WHERE start_date < date('now', 'localtime', 'weekday 1')
+                ),
+                created_counts AS (
+                    SELECT date(created_at, 'weekday 1') as wk_start, COUNT(*) as c_count
+                    FROM tickets
+                    GROUP BY wk_start
+                ),
+                resolved_counts AS (
+                    SELECT date(updated_at, 'weekday 1') as wk_start, COUNT(*) as r_count
+                    FROM tickets
+                    WHERE status IN ('Resolved', 'Closed')
+                    GROUP BY wk_start
+                )
+                SELECT 
+                    w.start_date,
+                    COALESCE(c.c_count, 0) as created,
+                    COALESCE(r.r_count, 0) as resolved
+                FROM weeks w
+                LEFT JOIN created_counts c ON w.start_date = c.wk_start
+                LEFT JOIN resolved_counts r ON w.start_date = r.wk_start
+                ORDER BY w.start_date ASC
+            """))
+            
+            weeks_data = []
+            for row in cursor.fetchall():
+                # Format display label (e.g., "Mar 02")
+                dt = datetime.strptime(row['start_date'], '%Y-%m-%d')
+                weeks_data.append({
+                    'week': dt.strftime('%b %d'),
+                    'created': row['created'],
+                    'resolved': row['resolved']
+                })
 
-        conn.close()
         return jsonify({'success': True, 'data': weeks_data})
     except Exception as e:
         print(f"[ADMIN] Ticket trends error: {e}")
@@ -2805,38 +2792,37 @@ def admin_list_students():
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with db_connection(AUTH_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        query = """
-            SELECT s.id, s.email, s.roll_number, s.full_name,
-                   s.department, s.year, s.section, s.phone,
-                   s.created_at, s.last_login,
-                   u.id as user_id, COALESCE(u.is_active, 1) as is_active,
-                   COALESCE(u.is_admin, 0) as is_admin
-            FROM students s
-            JOIN users u ON s.user_id = u.id
-            WHERE 1=1
-        """
-        params = []
-        if dept:
-            query += " AND s.department = ?"
-            params.append(dept)
-        if q:
-            query += " AND (LOWER(s.full_name) LIKE ? OR LOWER(s.roll_number) LIKE ? OR LOWER(s.email) LIKE ?)"
-            q_like = f'%{q.lower()}%'
-            params.extend([q_like, q_like, q_like])
-            
-        query += " ORDER BY s.full_name ASC LIMIT 50"
-        cursor.execute(query, params)
+            query = """
+                SELECT s.id, s.email, s.roll_number, s.full_name,
+                       s.department, s.year, s.section, s.phone,
+                       s.created_at, s.last_login,
+                       u.id as user_id, COALESCE(u.is_active, 1) as is_active,
+                       COALESCE(u.is_admin, 0) as is_admin
+                FROM students s
+                JOIN users u ON s.user_id = u.id
+                WHERE 1=1
+            """
+            params = []
+            if dept:
+                query += " AND s.department = ?"
+                params.append(dept)
+            if q:
+                query += " AND (LOWER(s.full_name) LIKE ? OR LOWER(s.roll_number) LIKE ? OR LOWER(s.email) LIKE ?)"
+                q_like = f'%{q.lower()}%'
+                params.extend([q_like, q_like, q_like])
+                
+            query += " ORDER BY s.full_name ASC LIMIT 50"
+            cursor.execute(adapt_query(query), params)
 
-        students = []
-        for row in cursor.fetchall():
-            d = dict(row)
-            d['name'] = d.get('full_name', '') # Map for frontend
-            students.append(d)
-        conn.close()
+            students = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                d['name'] = d.get('full_name', '') # Map for frontend
+                students.append(d)
         return jsonify({'success': True, 'data': students, 'count': len(students)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2850,39 +2836,38 @@ def admin_list_faculty():
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with db_connection(AUTH_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        query = """
-            SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
-                   fp.designation, fp.subject_incharge, fp.class_incharge,
-                   u.email, u.id as user_id,
-                   COALESCE(u.is_active, 1) as is_active,
-                   COALESCE(u.is_admin, 0) as is_admin,
-                   u.created_at
-            FROM faculty_profiles fp
-            JOIN users u ON fp.user_id = u.id
-            WHERE 1=1
-        """
-        params = []
-        if dept:
-            query += " AND fp.department = ?"
-            params.append(dept)
-        if q:
-            query += " AND (LOWER(fp.full_name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
-            q_like = f'%{q.lower()}%'
-            params.extend([q_like, q_like, q_like])
-            
-        query += " ORDER BY fp.full_name ASC LIMIT 50"
-        cursor.execute(query, params)
+            query = """
+                SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
+                       fp.designation, fp.subject_incharge, fp.class_incharge,
+                       u.email, u.id as user_id,
+                       COALESCE(u.is_active, 1) as is_active,
+                       COALESCE(u.is_admin, 0) as is_admin,
+                       u.created_at
+                FROM faculty_profiles fp
+                JOIN users u ON fp.user_id = u.id
+                WHERE 1=1
+            """
+            params = []
+            if dept:
+                query += " AND fp.department = ?"
+                params.append(dept)
+            if q:
+                query += " AND (LOWER(fp.full_name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
+                q_like = f'%{q.lower()}%'
+                params.extend([q_like, q_like, q_like])
+                
+            query += " ORDER BY fp.full_name ASC LIMIT 50"
+            cursor.execute(adapt_query(query), params)
 
-        faculty = []
-        for row in cursor.fetchall():
-            d = dict(row)
-            d['name'] = d.get('full_name', '') # Map for frontend
-            faculty.append(d)
-        conn.close()
+            faculty = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                d['name'] = d.get('full_name', '') # Map for frontend
+                faculty.append(d)
         return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2893,43 +2878,41 @@ def admin_list_faculty():
 def admin_get_user(user_id):
     """Read-only profile for any user by users.id."""
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, role, email, email_verified,
-                   COALESCE(is_active, 1) as is_active,
-                   COALESCE(is_admin, 0) as is_admin,
-                   created_at
-            FROM users WHERE id = ?
-        """, (user_id,))
-        user = cursor.fetchone()
-        if not user:
-            conn.close()
-            return jsonify({'success': False, 'error': 'User not found'}), 404
+        with db_connection(AUTH_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT id, role, email, email_verified,
+                       COALESCE(is_active, 1) as is_active,
+                       COALESCE(is_admin, 0) as is_admin,
+                       created_at
+                FROM users WHERE id = ?
+            """), (user_id,))
+            user = cursor.fetchone()
+            if not user:
+                return jsonify({'success': False, 'error': 'User not found'}), 404
 
-        result = dict(user)
-        role = result['role']
+            result = dict(user)
+            role = result['role']
 
-        if role == 'student':
-            cursor.execute("""
-                SELECT roll_number, full_name, department, year, section, phone, last_login
-                FROM students WHERE user_id = ?
-            """, (user_id,))
-            profile = cursor.fetchone()
-            if profile:
-                result.update(dict(profile))
-        elif role == 'faculty':
-            cursor.execute("""
-                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
-                FROM faculty_profiles WHERE user_id = ?
-            """, (user_id,))
-            profile = cursor.fetchone()
-            if profile:
-                result.update(dict(profile))
+            if role == 'student':
+                cursor.execute(adapt_query("""
+                    SELECT roll_number, full_name, department, year, section, phone, last_login
+                    FROM students WHERE user_id = ?
+                """), (user_id,))
+                profile = cursor.fetchone()
+                if profile:
+                    result.update(dict(profile))
+            elif role == 'faculty':
+                cursor.execute(adapt_query("""
+                    SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
+                    FROM faculty_profiles WHERE user_id = ?
+                """), (user_id,))
+                profile = cursor.fetchone()
+                if profile:
+                    result.update(dict(profile))
 
-        result['name'] = result.get('full_name', '')
-        conn.close()
+            result['name'] = result.get('full_name', '')
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2945,18 +2928,16 @@ def admin_toggle_user_active(user_id):
         if admin_user_id and int(admin_user_id) == int(user_id):
             return jsonify({'success': False, 'error': 'Cannot deactivate your own admin account'}), 400
 
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT email, COALESCE(is_active, 1) FROM users WHERE id = ?", (user_id,))
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({'success': False, 'error': 'User not found'}), 404
-        target_email, current_active = row
-        new_active = 0 if current_active else 1
-        cursor.execute("UPDATE users SET is_active = ? WHERE id = ?", (new_active, user_id))
-        conn.commit()
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT email, COALESCE(is_active, 1) FROM users WHERE id = ?"), (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'success': False, 'error': 'User not found'}), 404
+            target_email, current_active = row
+            new_active = 0 if current_active else 1
+            cursor.execute(adapt_query("UPDATE users SET is_active = ? WHERE id = ?"), (new_active, user_id))
+            conn.commit()
         status = 'activated' if new_active else 'deactivated'
         return jsonify({'success': True, 'new_status': bool(new_active), 'is_active': bool(new_active), 'message': f'Account {status}'})
     except Exception as e:
@@ -2976,17 +2957,15 @@ def admin_reset_password(user_id):
         if not pw_valid:
             return jsonify({'success': False, 'error': pw_error}), 400
 
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE id = ?", (user_id,))
-        if not cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'User not found'}), 404
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT id FROM users WHERE id = ?"), (user_id,))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'User not found'}), 404
 
-        new_hash = hash_password(new_password)
-        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
-        conn.commit()
-        conn.close()
+            new_hash = hash_password(new_password)
+            cursor.execute(adapt_query("UPDATE users SET password_hash = ? WHERE id = ?"), (new_hash, user_id))
+            conn.commit()
         return jsonify({'success': True, 'message': 'Password reset successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2998,36 +2977,34 @@ def admin_list_tickets():
     """All tickets across all departments, with optional status filter."""
     status_filter = (request.args.get('status', 'all') or 'all').strip()
     try:
-        conn = sqlite3.connect('data/tickets.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if status_filter and status_filter.lower() != 'all':
-            cursor.execute("""
-                SELECT ticket_id, student_email, category, sub_category, status,
-                       department, priority, created_at, updated_at, description
-                FROM tickets
-                WHERE LOWER(status) = LOWER(?)
-                ORDER BY created_at DESC
-                LIMIT 200
-            """, (status_filter,))
-        else:
-            cursor.execute("""
-                SELECT ticket_id, student_email, category, sub_category, status,
-                       department, priority, created_at, updated_at, description
-                FROM tickets
-                ORDER BY created_at DESC
-                LIMIT 200
-            """)
-        tickets = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        with db_connection('tickets') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if status_filter and status_filter.lower() != 'all':
+                cursor.execute(adapt_query("""
+                    SELECT ticket_id, student_email, category, sub_category, status,
+                           department, priority, created_at, updated_at, description
+                    FROM tickets
+                    WHERE LOWER(status) = LOWER(?)
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                """), (status_filter,))
+            else:
+                cursor.execute(adapt_query("""
+                    SELECT ticket_id, student_email, category, sub_category, status,
+                           department, priority, created_at, updated_at, description
+                    FROM tickets
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                """))
+            tickets = [dict(row) for row in cursor.fetchall()]
 
         # Root fix: Enrich with student names from students.db (cannot JOIN across DBs easily in SQLite)
         try:
-            sconn = sqlite3.connect(AUTH_DB_PATH)
-            scursor = sconn.cursor()
-            scursor.execute("SELECT email, full_name FROM students")
-            student_map = {row[0]: row[1] for row in scursor.fetchall()}
-            sconn.close()
+            with db_connection(AUTH_DB_PATH) as sconn:
+                scursor = sconn.cursor()
+                scursor.execute(adapt_query("SELECT email, full_name FROM students"))
+                student_map = {row[0]: row[1] for row in scursor.fetchall()}
             
             for t in tickets:
                 t['student_name'] = student_map.get(t['student_email'], 'N/A')
@@ -3047,18 +3024,13 @@ def admin_list_tickets():
 def admin_force_close_ticket(ticket_id):
     """Force close any ticket regardless of owner."""
     try:
-        conn = sqlite3.connect('data/tickets.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT ticket_id FROM tickets WHERE ticket_id = ?", (ticket_id,))
-        if not cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'Ticket not found'}), 404
-        cursor.execute(
-            "UPDATE tickets SET status = 'Closed', updated_at = ? WHERE ticket_id = ?",
-            (datetime.utcnow(), ticket_id)
-        )
-        conn.commit()
-        conn.close()
+        with db_connection('tickets') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                UPDATE tickets SET status = 'Closed', updated_at = ?
+                WHERE ticket_id = ?
+            """), (datetime.utcnow(), ticket_id))
+            conn.commit()
         return jsonify({'success': True, 'message': f'Ticket {ticket_id} force-closed'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3071,15 +3043,14 @@ def admin_force_close_ticket(ticket_id):
 def admin_list_announcements():
     """List all announcements, newest first."""
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, title, body, target, created_by, created_at, updated_at, is_active
-            FROM announcements ORDER BY created_at DESC
-        """)
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT id, title, body, target, created_by, created_at, updated_at, is_active
+                FROM announcements ORDER BY created_at DESC
+            """))
+            rows = [dict(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3100,15 +3071,19 @@ def admin_create_announcement():
             return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
 
         admin_email = request.current_user.get('email', 'admin')
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO announcements (title, body, target, created_by, created_at, updated_at, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        """, (title, body, target, admin_email, datetime.utcnow(), datetime.utcnow()))
-        new_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                INSERT INTO announcements (title, body, target, created_by, created_at, updated_at, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+            """), (title, body, target, admin_email, datetime.utcnow(), datetime.utcnow()))
+            new_id = cursor.lastrowid
+            
+            if not new_id and is_postgres():
+                cursor.execute("SELECT LASTVAL()")
+                new_id = cursor.fetchone()[0]
+                
+            conn.commit()
         return jsonify({'success': True, 'id': new_id, 'message': 'Announcement created'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3133,17 +3108,15 @@ def admin_update_announcement(ann_id):
         if target not in ('student', 'faculty', 'all'):
             return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
 
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM announcements WHERE id = ?", (ann_id,))
-        if not cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'Announcement not found'}), 404
-        cursor.execute("""
-            UPDATE announcements SET title=?, body=?, target=?, is_active=?, updated_at=? WHERE id=?
-        """, (title, body, target, is_active, datetime.utcnow(), ann_id))
-        conn.commit()
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT id FROM announcements WHERE id = ?"), (ann_id,))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Announcement not found'}), 404
+            cursor.execute(adapt_query("""
+                UPDATE announcements SET title=?, body=?, target=?, is_active=?, updated_at=? WHERE id=?
+            """), (title, body, target, is_active, datetime.utcnow(), ann_id))
+            conn.commit()
         return jsonify({'success': True, 'message': 'Announcement updated'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3154,15 +3127,13 @@ def admin_update_announcement(ann_id):
 def admin_delete_announcement(ann_id):
     """Delete an announcement."""
     try:
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM announcements WHERE id = ?", (ann_id,))
-        if not cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'error': 'Announcement not found'}), 404
-        cursor.execute("DELETE FROM announcements WHERE id = ?", (ann_id,))
-        conn.commit()
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT id FROM announcements WHERE id = ?"), (ann_id,))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Announcement not found'}), 404
+            cursor.execute(adapt_query("DELETE FROM announcements WHERE id = ?"), (ann_id,))
+            conn.commit()
         return jsonify({'success': True, 'message': 'Announcement deleted'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3171,24 +3142,21 @@ def admin_delete_announcement(ann_id):
 @app.route('/api/announcements/active', methods=['GET'])
 @require_auth(allowed_roles=['student', 'faculty'])
 def get_active_announcements():
-    """Get active announcements relevant to the calling user's role.
-    Students see target='student' or 'all'; faculty see target='faculty' or 'all'.
-    """
+    """Get active announcements relevant to the calling user's role."""
     try:
         user_role = request.current_user.get('role', 'student')
-        conn = sqlite3.connect(AUTH_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, title, body, target, created_at
-            FROM announcements
-            WHERE is_active = 1
-              AND (target = 'all' OR target = ?)
-            ORDER BY created_at DESC
-            LIMIT 10
-        """, (user_role,))
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+        with db_connection(AUTH_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT id, title, body, target, created_at
+                FROM announcements
+                WHERE is_active = 1
+                  AND (target = 'all' OR target = ?)
+                ORDER BY created_at DESC
+                LIMIT 10
+            """), (user_role,))
+            rows = [dict(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3199,25 +3167,24 @@ def get_active_announcements():
 @app.route('/api/admin/reports/tickets', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_report_tickets():
-    """Department-wise ticket breakdown: open, resolved, closed counts."""
+    """Department-wise ticket breakdown."""
     try:
-        conn = sqlite3.connect('data/tickets.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT
-                COALESCE(department, 'Unknown') as department,
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open,
-                SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
-                SUM(CASE WHEN status = 'Resolved' THEN 1 ELSE 0 END) as resolved,
-                SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
-            FROM tickets
-            GROUP BY COALESCE(department, 'Unknown')
-            ORDER BY total DESC
-        """)
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+        with db_connection('tickets') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("""
+                SELECT
+                    COALESCE(department, 'Unknown') as department,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open,
+                    SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
+                    SUM(CASE WHEN status = 'Resolved' THEN 1 ELSE 0 END) as resolved,
+                    SUM(CASE WHEN status = 'Closed' THEN 1 ELSE 0 END) as closed
+                FROM tickets
+                GROUP BY COALESCE(department, 'Unknown')
+                ORDER BY total DESC
+            """))
+            rows = [dict(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3226,7 +3193,7 @@ def admin_report_tickets():
 @app.route('/api/admin/reports/email-usage', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_report_email_usage():
-    """Email agent usage split: student emails vs faculty emails, total and last 7 days."""
+    """Email agent usage split."""
     from datetime import timedelta
     import pytz
     IST = pytz.timezone('Asia/Kolkata')
@@ -3238,30 +3205,34 @@ def admin_report_email_usage():
         'faculty': {'total': 0, 'last_7_days': 0},
     }
 
-    # Student emails from email_requests.db (faculty_data.db)
+    # Student emails from faculty_data.db
     try:
-        conn = sqlite3.connect('data/faculty_data.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM email_requests")
-        result['student']['total'] = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM email_requests WHERE DATE(created_at) >= ?", (week_ago,))
-        result['student']['last_7_days'] = cursor.fetchone()[0]
-        conn.close()
+        with db_connection('faculty_data') as conn:
+            cursor = conn.cursor()
+            cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests"))
+            result['student']['total'] = cursor.fetchone()[0]
+            cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE DATE(created_at) >= ?"), (week_ago,))
+            result['student']['last_7_days'] = cursor.fetchone()[0]
     except Exception as e:
         print(f"[ADMIN] Student email stats error: {e}")
 
-    # Faculty sent emails from faculty_data.db sent_emails table (if exists)
+    # Faculty sent emails from faculty_data.db
     try:
-        conn = sqlite3.connect('data/faculty_data.db')
-        cursor = conn.cursor()
-        # Check if sent_emails table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_emails'")
-        if cursor.fetchone():
-            cursor.execute("SELECT COUNT(*) FROM sent_emails")
-            result['faculty']['total'] = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM sent_emails WHERE DATE(sent_at) >= ?", (week_ago,))
-            result['faculty']['last_7_days'] = cursor.fetchone()[0]
-        conn.close()
+        with db_connection('faculty_data') as conn:
+            cursor = conn.cursor()
+            # Check if sent_emails table exists (SQLite approach)
+            if not is_postgres():
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_emails'")
+                exists = cursor.fetchone()
+            else:
+                cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sent_emails')")
+                exists = cursor.fetchone()[0]
+
+            if exists:
+                cursor.execute(adapt_query("SELECT COUNT(*) FROM sent_emails"))
+                result['faculty']['total'] = cursor.fetchone()[0]
+                cursor.execute(adapt_query("SELECT COUNT(*) FROM sent_emails WHERE DATE(sent_at) >= ?"), (week_ago,))
+                result['faculty']['last_7_days'] = cursor.fetchone()[0]
     except Exception as e:
         print(f"[ADMIN] Faculty email stats error: {e}")
 

@@ -82,16 +82,17 @@ class StudentRecordsRepository:
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Returns True iff the DB file exists and has a 'students' table."""
-        if not os.path.exists(self.db_path):
-            return False
+        """Returns True iff the database is available and has a 'students' table."""
+        from core.db_config import is_postgres, adapt_query
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
-            exists = cur.fetchone() is not None
-            conn.close()
-            return exists
+            with get_db_connection('students') as conn:
+                cur = conn.cursor()
+                if not is_postgres():
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
+                else:
+                    cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'students')")
+                exists = cur.fetchone()[0] if is_postgres() else cur.fetchone() is not None
+                return exists
         except Exception:
             return False
 
@@ -100,9 +101,9 @@ class StudentRecordsRepository:
     # ------------------------------------------------------------------
 
     def _connect(self):
-        conn = sqlite3.connect(self.db_path, timeout=10)
+        from core.db_config import get_db_connection
+        conn = get_db_connection('students')
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
         return conn
 
     def _rows_to_dicts(self, rows) -> List[Dict]:
@@ -121,16 +122,17 @@ class StudentRecordsRepository:
         """
         if not email or "@" not in email:
             return None
+        from core.db_config import adapt_query
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute(
+            cur.execute(adapt_query(
                 """
                 SELECT full_name, roll_number, email, department, year, section
                 FROM students
                 WHERE LOWER(email) = LOWER(?)
                 LIMIT 1
-                """,
+                """),
                 (email.strip(),),
             )
             row = cur.fetchone()
@@ -139,7 +141,7 @@ class StudentRecordsRepository:
             print(f"[STUDENT_REPO] find_by_email → match={'yes' if row else 'no'}")
             return dict(row) if row else None
         except Exception as exc:
-            print(f"[STUDENT_REPO] find_by_email error: {type(exc).__name__}")
+            print(f"[STUDENT_REPO] find_by_email error: {exc}")
             return None
 
     # ------------------------------------------------------------------
@@ -155,27 +157,28 @@ class StudentRecordsRepository:
         clean = normalise_name(name)
         if not clean:
             return []
+        from core.db_config import adapt_query
         try:
             conn = self._connect()
             cur = conn.cursor()
             if partial:
-                cur.execute(
+                cur.execute(adapt_query(
                     """
                     SELECT full_name, roll_number, email, department, year, section
                     FROM students
                     WHERE LOWER(full_name) LIKE LOWER(?)
                     ORDER BY full_name
                     LIMIT 20
-                    """,
+                    """),
                     (f"%{clean}%",),
                 )
             else:
-                cur.execute(
+                cur.execute(adapt_query(
                     """
                     SELECT full_name, roll_number, email, department, year, section
                     FROM students
                     WHERE LOWER(full_name) = LOWER(?)
-                    """,
+                    """),
                     (clean,),
                 )
             rows = cur.fetchall()
@@ -206,6 +209,7 @@ class StudentRecordsRepository:
         norm_year = normalise_year(str(year)) if year is not None else None
         norm_section = normalise_section(section) if section is not None else None
 
+        from core.db_config import adapt_query
         try:
             conn = self._connect()
             cur = conn.cursor()
@@ -227,7 +231,7 @@ class StudentRecordsRepository:
                 ORDER BY full_name
                 LIMIT 30
             """
-            cur.execute(query, params)
+            cur.execute(adapt_query(query), params)
             rows = cur.fetchall()
             conn.close()
 
@@ -273,16 +277,17 @@ class StudentRecordsRepository:
         """
         if not roll_number:
             return None
+        from core.db_config import adapt_query
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute(
+            cur.execute(adapt_query(
                 """
                 SELECT full_name, roll_number, email, department, year, section
                 FROM students
                 WHERE UPPER(roll_number) = UPPER(?)
                 LIMIT 1
-                """,
+                """),
                 (roll_number.strip(),),
             )
             row = cur.fetchone()
@@ -317,16 +322,17 @@ class StudentRecordsRepository:
             params.append(norm_section)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        from core.db_config import adapt_query
         try:
             conn = self._connect()
             cur = conn.cursor()
-            cur.execute(
+            cur.execute(adapt_query(
                 f"""
                 SELECT full_name, roll_number, email, department, year, section
                 FROM students {where}
                 ORDER BY full_name
                 LIMIT 50
-                """,
+                """),
                 params,
             )
             rows = cur.fetchall()
