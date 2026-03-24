@@ -1,9 +1,10 @@
-"""
-Flask Web Application for Student Support System
-Provides API endpoints for FAQ, Email, and Ticket agents
-SQLite backend with unified authentication system
-"""
 import os
+import sys
+
+# Standard Vercel Python directory fix
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Optimization for serverless (prevents excessive thread forks)
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"

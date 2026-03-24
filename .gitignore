@@ -7,14 +7,25 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
 .venv/
 venv/
 env/
+.venv312/
+
+# Frontend (Node/React)
+node_modules/
+dist/
+dist-ssr/
+build/
+*.local
+npm-debug.log*
 
 # Environment Variables
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # Database Files
 *.db
@@ -33,24 +44,21 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Node modules (frontend)
-frontend/node_modules/
-# frontend/dist/
-frontend/build/
+error.log
+error_trace.txt
 
 # Vector databases
 data/vectordb/
 data/chat_memory_db/
 data/user_history_db/
 
-# Playwright Browsers
+# Playwright
 pw-browsers/
 
 # Runtime data
 data/turn_logs.jsonl
 
-# Static uploads (user-generated)
+# Static uploads
 static/profile_photos/
 
 # Gemini Agent
