@@ -47,15 +47,8 @@ class FacultyDatabase:
 
     def get_connection(self):
         """Get database connection - PostgreSQL or SQLite based on config"""
-        if is_postgres():
-            # Use centralized PostgreSQL connection
-            return get_db_connection('faculty')
-        else:
-            # SQLite fallback with WAL mode
-            conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA foreign_keys=ON;")
-            return conn
+        # Always use the hardened centralized connection factory
+        return get_db_connection('faculty_data')
 
     def _execute_with_retry(self, operation, *args, **kwargs):
         """Execute a database operation with retry logic for lock errors"""

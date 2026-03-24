@@ -14,7 +14,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from flask import Flask, render_template, request, jsonify, session
 from flask_cors import CORS
-from agents.faculty_db import FacultyDatabase, init_faculty_db
 import os
 from datetime import datetime, timedelta
 import sqlite3
@@ -73,8 +72,7 @@ CORS(app,
 
 # Initialize database systems
 # CRITICAL: On Vercel, the filesystem is READ-ONLY. 
-# We must skip SQLite initialization if we are using the cloud Postgres backend.
-if not is_postgres():
+if not is_postgres() and not os.getenv('VERCEL'):
     print("\n[INFO] Checking Local Authentication System...")
     try:
         init_auth_database()
@@ -83,42 +81,61 @@ if not is_postgres():
     except Exception as e:
         print(f"[ERROR] Failed to initialize local SQLite: {e}")
 else:
-    print("\n[INFO] Using Cloud Database (Postgres). Skipping local SQLite initialization.")
+    if os.getenv('VERCEL'):
+        print("\n[INFO] Vercel environment detected. Using Cloud-Only mode.")
+    else:
+        print("\n[INFO] Using Cloud Database (Postgres). Skipping local SQLite initialization.")
 
-# Initialize orchestrator (creates all agents internally — FAQAgent, EmailAgent, TicketAgent)
-# This is the single point of initialization to avoid duplicate ML model loads
-print("\n" + "=" * 60)
-print("  Initializing Student Support Agents")
-print("=" * 60)
+# -----------------------------------------------------------------------------
+# LAZY AGENT INITIALIZATION (Serverless Optimized)
+# -----------------------------------------------------------------------------
 
-print("\n[INFO] Initializing Orchestrator Agent...")
-from agents.orchestrator_agent import get_orchestrator
-orchestrator_agent = get_orchestrator()
+_orchestrator_agent = None
+_faculty_orchestrator_agent = None
+_email_request_service = None
 
-# Initialize Faculty Orchestrator (separate from student orchestrator)
-print("\n[INFO] Initializing Faculty Orchestrator Agent...")
-from agents.faculty_orchestrator_agent import get_faculty_orchestrator
-faculty_orchestrator_agent = get_faculty_orchestrator()
+def get_orchestrator():
+    global _orchestrator_agent
+    if _orchestrator_agent is None:
+        console_print("\n[INFO] Initializing Orchestrator Agent (Lazy)...")
+        from agents.orchestrator_agent import OrchestratorAgent
+        _orchestrator_agent = OrchestratorAgent()
+    return _orchestrator_agent
 
-# Reuse orchestrator's agents (avoids creating duplicates)
-email_agent = orchestrator_agent.email_agent
-ticket_agent = orchestrator_agent.ticket_agent
-faq_agent = orchestrator_agent.faq_agent
+def get_faculty_orchestrator():
+    global _faculty_orchestrator_agent
+    if _faculty_orchestrator_agent is None:
+        console_print("\n[INFO] Initializing Faculty Orchestrator Agent (Lazy)...")
+        from agents.faculty_orchestrator_agent import get_faculty_orchestrator as get_impl
+        _faculty_orchestrator_agent = get_impl()
+    return _faculty_orchestrator_agent
 
-# Initialize faculty contact system
-print("\n[INFO] Initializing Faculty Contact System...")
-if not is_postgres():
-    faculty_db = init_faculty_db()
-else:
-    # In Postgres mode, the FacultyDatabase class should handle its own connection
+def get_email_agent():
+    return get_orchestrator().email_agent
+
+def get_ticket_agent():
+    return get_orchestrator().ticket_agent
+
+def get_faq_agent():
+    return get_orchestrator().faq_agent
+
+def get_faculty_database():
     from agents.faculty_db import FacultyDatabase
-    faculty_db = FacultyDatabase()
+    return FacultyDatabase()
 
-# Initialize email request service for faculty email routes
-from agents.email_request_service import EmailRequestService
-email_request_service = EmailRequestService()
+def get_email_request_service():
+    global _email_request_service
+    if _email_request_service is None:
+        from agents.email_request_service import EmailRequestService
+        _email_request_service = EmailRequestService()
+    return _email_request_service
 
-print("\n[OK] All agents initialized successfully\n")
+def console_print(msg):
+    """Helper to print only in non-vercel or debug mode"""
+    if not os.getenv('VERCEL'):
+         print(msg)
+
+console_print("\n[OK] Serverless-safe agent registry ready.")
 
 
 # ============================================
@@ -166,8 +183,7 @@ def register_user():
             }), 429
 
         # Check if email already exists in users table
-        with db_connection('students') as conn:
-            cursor = conn.cursor()
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("SELECT id, email_verified FROM users WHERE email = ?"), (email,))
             existing_user = cursor.fetchone()
         is_reregistration = False
@@ -340,7 +356,7 @@ Best regards,
 ACE Engineering College
 Student Support Team
 """
-            email_agent.send_email(to_email=email, subject=subject, body=body)
+            get_email_agent().send_email(to_email=email, subject=subject, body=body)
             log_auth_event(email, 'otp_send', success=True, details='OTP sent after registration', req=request)
         except Exception as otp_err:
             print(f"[WARN] OTP send failed after registration: {otp_err}")
@@ -380,8 +396,7 @@ def send_otp_endpoint():
         }
 
         # Check if user exists
-        with db_connection('students') as conn:
-            cursor = conn.cursor()
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("SELECT id, email_verified FROM users WHERE email = ?"), (email,))
             user = cursor.fetchone()
 
@@ -435,7 +450,7 @@ Student Support Team
 """
 
         try:
-            email_result = email_agent.send_email(to_email=email, subject=subject, body=body)
+            email_result = get_email_agent().send_email(to_email=email, subject=subject, body=body)
             if email_result.get('success'):
                 log_auth_event(email, 'otp_send', success=True, req=request)
                 return jsonify({
@@ -476,8 +491,7 @@ def verify_otp_endpoint():
             return jsonify({'success': False, 'error': message}), 400
 
         # Mark email as verified in users table
-        with db_connection('students') as conn:
-            cursor = conn.cursor()
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("UPDATE users SET email_verified = 1 WHERE email = ?"), (email,))
 
             # Get user info
@@ -575,8 +589,7 @@ def login_user():
             }), 429
 
         # Look up user by email
-        with db_connection('students') as conn:
-            cursor = conn.cursor()
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("""
                 SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, 0), COALESCE(is_active, 1)
                 FROM users
@@ -732,8 +745,7 @@ def change_password():
             return jsonify({'success': False, 'error': pw_error}), 400
 
         # Fetch current password hash
-        with db_connection('students') as conn:
-            cursor = conn.cursor()
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("SELECT password_hash FROM users WHERE id = ?"), (user_id,))
             user = cursor.fetchone()
 
@@ -1030,16 +1042,20 @@ def get_faculty_dashboard():
         resolved_7d = 0
         tickets_today = 0
         try:
-            t_conn = sqlite3.connect('data/tickets.db', timeout=10)
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
-            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE status IN ('Open','Assigned','In Progress')")
-            open_tickets = tc.fetchone()['c']
-            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE status='Resolved' AND DATE(updated_at) >= ?", (seven_days_ago,))
-            resolved_7d = tc.fetchone()['c']
-            tc.execute("SELECT COUNT(*) as c FROM tickets WHERE DATE(created_at) = ?", (today,))
-            tickets_today = tc.fetchone()['c']
-            t_conn.close()
+            with db_cursor('tickets', dict_cursor=True) as tc:
+                # Use SQL-agnostic date comparison
+                date_filter = "CAST(created_at AS DATE) = CAST(? AS DATE)" if is_postgres() else "DATE(created_at) = ?"
+                resolved_filter = "CAST(updated_at AS DATE) >= CAST(? AS DATE)" if is_postgres() else "DATE(updated_at) >= ?"
+                today_filter = "CAST(created_at AS DATE) = CAST(? AS DATE)" if is_postgres() else "DATE(created_at) = ?"
+
+                tc.execute(adapt_query("SELECT COUNT(*) as c FROM tickets WHERE status IN ('Open','Assigned','In Progress')"))
+                open_tickets = tc.fetchone()['c']
+                
+                tc.execute(adapt_query(f"SELECT COUNT(*) as c FROM tickets WHERE status='Resolved' AND {resolved_filter}"), (seven_days_ago,))
+                resolved_7d = tc.fetchone()['c']
+                
+                tc.execute(adapt_query(f"SELECT COUNT(*) as c FROM tickets WHERE {today_filter}"), (today,))
+                tickets_today = tc.fetchone()['c']
         except Exception as te:
             print(f"[DASHBOARD] Ticket stats error: {te}")
 
@@ -1047,17 +1063,18 @@ def get_faculty_dashboard():
         unread_emails = 0
         emails_today = 0
         try:
-            e_conn = sqlite3.connect('data/faculty_data.db', timeout=10)
-            e_conn.row_factory = sqlite3.Row
-            ec = e_conn.cursor()
-            # Count all emails addressed to this faculty (by name match)
-            ec.execute("SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ?",
-                        (f"%{full_name.lower()}%",))
-            unread_emails = ec.fetchone()['c']
-            ec.execute("SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?",
-                        (f"%{full_name.lower()}%", today))
-            emails_today = ec.fetchone()['c']
-            e_conn.close()
+            with db_cursor('faculty_data', dict_cursor=True) as ec:
+                # Use SQL-agnostic date comparison
+                today_email_filter = "CAST(timestamp AS DATE) = CAST(? AS DATE)" if is_postgres() else "DATE(timestamp) = ?"
+
+                # Count all emails addressed to this faculty (by name match)
+                ec.execute(adapt_query("SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ?"),
+                            (f"%{full_name.lower()}%",))
+                unread_emails = ec.fetchone()['c']
+                
+                ec.execute(adapt_query(f"SELECT COUNT(*) as c FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND {today_email_filter}"),
+                            (f"%{full_name.lower()}%", today))
+                emails_today = ec.fetchone()['c']
         except Exception as ee:
             print(f"[DASHBOARD] Email stats error: {ee}")
 
@@ -1076,15 +1093,13 @@ def get_faculty_dashboard():
             day_tickets = 0
             day_emails = 0
             try:
-                with db_connection('tickets') as t_conn:
-                    tc = t_conn.cursor()
+                with db_cursor('tickets') as tc:
                     tc.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE DATE(created_at) = ?"), (d,))
                     day_tickets = tc.fetchone()[0]
             except:
                 pass
             try:
-                with db_connection('faculty_data') as e_conn:
-                    ec = e_conn.cursor()
+                with db_cursor('faculty_data') as ec:
                     ec.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE LOWER(faculty_name) LIKE ? AND DATE(timestamp) = ?"),
                                 (f"%{full_name.lower()}%", d))
                     day_emails = ec.fetchone()[0]
@@ -1095,9 +1110,7 @@ def get_faculty_dashboard():
         # --- Recent Activity ---
         recent_tickets = []
         try:
-            with db_connection('tickets') as t_conn:
-                t_conn.row_factory = sqlite3.Row
-                tc = t_conn.cursor()
+            with db_cursor('tickets', dict_cursor=True) as tc:
                 tc.execute(adapt_query("SELECT ticket_id, student_email, category, sub_category, priority, status, created_at FROM tickets ORDER BY created_at DESC LIMIT 5"))
                 for r in tc.fetchall():
                     recent_tickets.append(dict(r))
@@ -1106,9 +1119,7 @@ def get_faculty_dashboard():
 
         recent_emails = []
         try:
-            with db_connection('faculty_data') as e_conn:
-                e_conn.row_factory = sqlite3.Row
-                ec = e_conn.cursor()
+            with db_cursor('faculty_data', dict_cursor=True) as ec:
                 ec.execute(adapt_query("SELECT student_name, student_email, subject, status, timestamp FROM email_requests WHERE LOWER(faculty_name) LIKE ? ORDER BY timestamp DESC LIMIT 5"),
                             (f"%{full_name.lower()}%",))
                 for r in ec.fetchall():
@@ -1120,8 +1131,7 @@ def get_faculty_dashboard():
         timetable = {}
         try:
             import json as json_mod
-            with db_connection('students') as s_conn:
-                sc = s_conn.cursor()
+            with db_cursor('students') as sc:
                 sc.execute(adapt_query("""
                     SELECT fp.timetable 
                     FROM faculty_profiles fp 
@@ -1297,7 +1307,7 @@ def faq_endpoint():
             return jsonify({'error': 'No message provided'}), 400
         
         # Process with enhanced FAQ agent
-        response = faq_agent.process(user_query)
+        response = get_faq_agent().process(user_query)
         return jsonify({'response': response, 'agent': 'FAQ Agent'})
     
     except Exception as e:
@@ -1341,10 +1351,10 @@ def email_endpoint():
         if preview_mode:
             try:
                 # Generate subject
-                subject = email_agent.generate_email_subject(purpose, regenerate=regenerate)
+                subject = get_email_agent().generate_email_subject(purpose, regenerate=regenerate)
                 
                 # Generate body with advanced options
-                body = email_agent.generate_email_body(
+                body = get_email_agent().generate_email_body(
                     purpose=purpose,
                     recipient_name=recipient_name,
                     tone=tone,
@@ -1392,7 +1402,7 @@ def email_endpoint():
                 print(f"⚠️ [EMAIL_VALIDATION_WARNING] Body is very short ({len(custom_body)} chars) - possible preview mismatch")
             
             # Send email with user-edited subject and body
-            result = email_agent.send_email(to_email, custom_subject, custom_body, image_urls)
+            result = get_email_agent().send_email(to_email, custom_subject, custom_body, image_urls)
             
             response_msg = result.get('message', 'Email processing completed')
             if result.get('images_attached', 0) > 0:
@@ -1423,8 +1433,7 @@ def get_faculty_tickets():
         email = request.current_user.get('email')
         
         # Get faculty department
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("""
                 SELECT fp.department 
                 FROM faculty_profiles fp 
@@ -1439,16 +1448,12 @@ def get_faculty_tickets():
         department = row[0]
         
         # Get all students in this faculty's department
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
             student_emails = [r[0] for r in sc.fetchall()]
         
         # Get tickets for these students
-        with db_connection('tickets') as t_conn:
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
-            
+        with db_cursor('tickets', dict_cursor=True) as tc:
             if student_emails:
                 placeholders = ','.join(['?'] * len(student_emails))
                 tc.execute(adapt_query(f"SELECT * FROM tickets WHERE student_email IN ({placeholders}) ORDER BY created_at DESC"), student_emails)
@@ -1468,8 +1473,7 @@ def get_faculty_ticket_detail(ticket_id):
     try:
         email = request.current_user.get('email')
         
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("""
                 SELECT fp.department 
                 FROM faculty_profiles fp 
@@ -1484,14 +1488,11 @@ def get_faculty_ticket_detail(ticket_id):
         department = row[0]
         
         # Verification: Does this ticket belong to a student in the faculty's department?
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
             student_emails = [r[0] for r in sc.fetchall()]
         
-        with db_connection('tickets') as t_conn:
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
+        with db_cursor('tickets', dict_cursor=True) as tc:
             tc.execute(adapt_query("SELECT * FROM tickets WHERE ticket_id = ?"), (ticket_id,))
             ticket = tc.fetchone()
         
@@ -1520,8 +1521,7 @@ def resolve_faculty_ticket(ticket_id):
         if not resolution_note:
             return jsonify({'success': False, 'error': 'Resolution note is required'}), 400
             
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("""
                 SELECT fp.department 
                 FROM faculty_profiles fp 
@@ -1536,14 +1536,11 @@ def resolve_faculty_ticket(ticket_id):
         department = row[0]
         
         # Verification: Does this ticket belong to a student in the faculty's department?
-        with db_connection('students') as s_conn:
-            sc = s_conn.cursor()
+        with db_cursor('students') as sc:
             sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (department,))
             student_emails = [r[0] for r in sc.fetchall()]
         
-        with db_connection('tickets') as t_conn:
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
+        with db_cursor('tickets', dict_cursor=True) as tc:
             
             # Verify ownership
             tc.execute(adapt_query("SELECT id, student_email FROM tickets WHERE ticket_id = ?"), (ticket_id,))
@@ -1594,8 +1591,8 @@ def notify_faculty_ticket(ticket_id):
             # Generate email preview based on resolution note
             purpose = f"Notify student that their ticket ({ticket_id}) has been resolved. Note: {resolution_note}"
             try:
-                subject = email_agent.generate_email_subject(f"Ticket {ticket_id} Resolved", regenerate=regenerate)
-                body = email_agent.generate_email_body(
+                subject = get_email_agent().generate_email_subject(f"Ticket {ticket_id} Resolved", regenerate=regenerate)
+                body = get_email_agent().generate_email_body(
                     purpose=purpose,
                     recipient_name="Student",
                     tone="formal",
@@ -1620,7 +1617,7 @@ def notify_faculty_ticket(ticket_id):
             if not custom_subject or not custom_body:
                 return jsonify({'success': False, 'error': 'Subject and body required for sending'}), 400
                 
-            result = email_agent.send_email(
+            result = get_email_agent().send_email(
                 to_email=student_email,
                 subject=custom_subject,
                 body=custom_body,
@@ -1648,9 +1645,7 @@ def get_faculty_emails():
         full_name = request.current_user.get('full_name', '')
         filter_type = request.args.get('filter', 'all')  # all, pending, replied, sent
         
-        with db_connection('faculty_data') as e_conn:
-            e_conn.row_factory = sqlite3.Row
-            ec = e_conn.cursor()
+        with db_cursor('faculty_data', dict_cursor=True) as ec:
             
             all_emails = []
             
@@ -1739,9 +1734,7 @@ def get_faculty_email_detail(email_id):
         email = request.current_user.get('email')
         full_name = request.current_user.get('full_name', '')
         
-        with db_connection('faculty_data') as e_conn:
-            e_conn.row_factory = sqlite3.Row
-            ec = e_conn.cursor()
+        with db_cursor('faculty_data', dict_cursor=True) as ec:
             
             ec.execute(adapt_query("SELECT * FROM email_requests WHERE id = ? AND LOWER(faculty_name) LIKE ?"), 
                        (email_id, f"%{full_name.lower()}%"))
@@ -1785,7 +1778,7 @@ def reply_faculty_email(email_id):
                 subject_prefix = "Re: " if not original_subject.startswith("Re:") else ""
                 new_subject = f"{subject_prefix}{original_subject}" if original_subject else "Reply from Faculty"
                 
-                body = email_agent.generate_email_body(
+                body = get_email_agent().generate_email_body(
                     purpose=purpose,
                     recipient_name="Student",
                     tone="formal",
@@ -1811,7 +1804,7 @@ def reply_faculty_email(email_id):
             if not custom_subject or not custom_body:
                 return jsonify({'success': False, 'error': 'Subject and body required for sending'}), 400
                 
-            result = email_agent.send_email(
+            result = get_email_agent().send_email(
                 to_email=student_email,
                 subject=custom_subject,
                 body=custom_body,
@@ -1821,8 +1814,7 @@ def reply_faculty_email(email_id):
             # Optionally update status in email_requests to "Replied"
             if result.get('success'):
                 try:
-                    with db_connection('faculty_data') as e_conn:
-                        ec = e_conn.cursor()
+                    with db_cursor('faculty_data') as ec:
                         ec.execute(adapt_query("UPDATE email_requests SET status = 'Replied' WHERE id = ?"), (email_id,))
                         e_conn.commit()
                 except Exception as db_err:
@@ -1842,7 +1834,7 @@ def reply_faculty_email(email_id):
 def get_ticket_categories():
     """Get all ticket categories and subcategories"""
     try:
-        categories_data = ticket_agent.get_categories()
+        categories_data = get_ticket_agent().get_categories()
         return jsonify(categories_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1858,7 +1850,7 @@ def check_duplicate_ticket():
         if not email or not category:
             return jsonify({'error': 'Missing email or category'}), 400
         
-        duplicate = ticket_agent.db.check_duplicate_ticket(email, category)
+        duplicate = get_ticket_agent().db.check_duplicate_ticket(email, category)
         
         return jsonify({
             'has_duplicate': duplicate is not None,
@@ -1895,7 +1887,7 @@ def create_ticket():
                 }), 429
         
         # Create ticket
-        result = ticket_agent.create_ticket(data)
+        result = get_ticket_agent().create_ticket(data)
         
         if not result['success']:
             return jsonify(result), 400
@@ -1928,14 +1920,14 @@ Description: {result['description'][:200]}...
 The ticket has been assigned to {result['department']}.
 """
             
-            email_body = email_agent.generate_email_body(
+            email_body = get_email_agent().generate_email_body(
                 purpose=email_purpose,
                 recipient_name="Student",
                 additional_context=f"You will receive updates on ticket {ticket_id} via email."
             )
             
             # Send email
-            email_result = email_agent.send_email(
+            email_result = get_email_agent().send_email(
                 to_email=student_email,
                 subject=email_subject,
                 body=email_body
@@ -1958,7 +1950,7 @@ The ticket has been assigned to {result['department']}.
 def get_student_tickets(email):
     """Get all tickets for a student"""
     try:
-        result = ticket_agent.get_student_tickets(email)
+        result = get_ticket_agent().get_student_tickets(email)
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1987,7 +1979,7 @@ def close_ticket(ticket_id):
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
         
         # Close the ticket with ownership validation
-        result = ticket_agent.close_ticket(ticket_id, user_email)
+        result = get_ticket_agent().close_ticket(ticket_id, user_email)
         
         if result.get('success'):
             return jsonify(result)
@@ -2022,7 +2014,7 @@ def close_all_tickets():
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
         
         # Close all tickets with ownership validation
-        result = ticket_agent.close_all_tickets(user_email)
+        result = get_ticket_agent().close_all_tickets(user_email)
         
         return jsonify(result)
             
@@ -2035,7 +2027,7 @@ def close_all_tickets():
 def reset_endpoint():
     """Reset conversation history for FAQ agent"""
     try:
-        faq_agent.reset_conversation()
+        get_faq_agent().reset_conversation()
         return jsonify({'message': 'Conversation reset successfully'})
     
     except Exception as e:
@@ -2062,7 +2054,7 @@ def email_history_page():
 def get_departments():
     """Get all unique departments"""
     try:
-        departments = faculty_db.get_all_departments()
+        departments = get_faculty_database().get_all_departments()
         return jsonify({
             'success': True,
             'departments': departments
@@ -2078,10 +2070,10 @@ def get_faculty_list():
         department = request.args.get('department', '').strip()
         
         if department:
-            faculty_list = faculty_db.get_faculty_by_department(department)
+            faculty_list = get_faculty_database().get_faculty_by_department(department)
         else:
             # Return ALL faculty when no department filter
-            raw = faculty_db.get_all_faculty()
+            raw = get_faculty_database().get_all_faculty()
             faculty_list = []
             for f in raw:
                 # get_all_faculty returns dicts from dict cursor
@@ -2324,16 +2316,13 @@ def chat_orchestrator():
         
         # 3. Fallback for testing - use first student if still no user_id
         if not user_id:
-            with db_connection('students') as conn:
-                cursor = conn.cursor()
+            with db_cursor('students') as cursor:
                 cursor.execute(adapt_query("SELECT id FROM students LIMIT 1")) # Get ID instead of email
                 result = cursor.fetchone()
                 user_id = result[0] if result else "test_user"
         
         # Get student profile for context - checking both email and id
-        with db_connection('students') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        with db_cursor('students', dict_cursor=True) as cursor:
             
             # Try finding by Roll Number first (since 22AG1A66A8 is a Roll Number)
             cursor.execute(adapt_query("""
@@ -2394,8 +2383,7 @@ def confirm_chat_action():
         
         # Fallback
         if not user_id:
-            with db_connection('students') as conn:
-                cursor = conn.cursor()
+            with db_cursor('students') as cursor:
                 cursor.execute(adapt_query("SELECT email FROM students LIMIT 1"))
                 result = cursor.fetchone()
                 user_id = result[0] if result else "test@student.com"
@@ -2409,9 +2397,7 @@ def confirm_chat_action():
             })
         
         # Get student profile
-        with db_connection('students') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        with db_cursor('students', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT email, full_name, roll_number, department, year 
                 FROM students WHERE email = ?
@@ -2542,9 +2528,7 @@ def faculty_chat_orchestrator():
         # Fetch full_name from faculty_profiles
         faculty_profile = {}
         try:
-            with db_connection('students') as conn:
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
+            with db_cursor('students', dict_cursor=True) as cur:
                 cur.execute(adapt_query("""
                     SELECT fp.full_name, fp.department, fp.designation, fp.employee_id
                     FROM faculty_profiles fp
@@ -2696,8 +2680,7 @@ def admin_dashboard():
         open_tickets = 0
         resolved_tickets = 0
         try:
-            with db_connection('tickets') as tconn:
-                tcur = tconn.cursor()
+            with db_cursor('tickets') as tcur:
                 tcur.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE status = 'Open'"))
                 open_tickets = tcur.fetchone()[0]
                 tcur.execute(adapt_query("SELECT COUNT(*) FROM tickets WHERE status IN ('Resolved', 'Closed')"))
@@ -2725,9 +2708,7 @@ def admin_dashboard():
 def admin_ticket_trends():
     """Weekly ticket created vs resolved trends for the last 8 weeks."""
     try:
-        with db_connection('tickets') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        with db_cursor('tickets', dict_cursor=True) as cursor:
 
             # Pure SQLite approach: Generate last 8 weeks, LEFT JOIN with created and resolved counts.
             # This completely avoids Python-SQLite strftime mismatches.
@@ -2793,7 +2774,7 @@ def admin_list_students():
 
     try:
         with db_connection(AUTH_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
+            # row_factory handled by db_cursor
             cursor = conn.cursor()
 
             query = """
@@ -2837,7 +2818,7 @@ def admin_list_faculty():
 
     try:
         with db_connection(AUTH_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
+            # row_factory handled by db_cursor
             cursor = conn.cursor()
 
             query = """
@@ -2879,7 +2860,7 @@ def admin_get_user(user_id):
     """Read-only profile for any user by users.id."""
     try:
         with db_connection(AUTH_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
+            # row_factory handled by db_cursor
             cursor = conn.cursor()
             cursor.execute(adapt_query("""
                 SELECT id, role, email, email_verified,
@@ -2977,9 +2958,7 @@ def admin_list_tickets():
     """All tickets across all departments, with optional status filter."""
     status_filter = (request.args.get('status', 'all') or 'all').strip()
     try:
-        with db_connection('tickets') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        with db_cursor('tickets', dict_cursor=True) as cursor:
             if status_filter and status_filter.lower() != 'all':
                 cursor.execute(adapt_query("""
                     SELECT ticket_id, student_email, category, sub_category, status,
@@ -3024,8 +3003,7 @@ def admin_list_tickets():
 def admin_force_close_ticket(ticket_id):
     """Force close any ticket regardless of owner."""
     try:
-        with db_connection('tickets') as conn:
-            cursor = conn.cursor()
+        with db_cursor('tickets') as cursor:
             cursor.execute(adapt_query("""
                 UPDATE tickets SET status = 'Closed', updated_at = ?
                 WHERE ticket_id = ?
@@ -3044,7 +3022,7 @@ def admin_list_announcements():
     """List all announcements, newest first."""
     try:
         with db_connection(AUTH_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
+            # row_factory handled by db_cursor
             cursor = conn.cursor()
             cursor.execute(adapt_query("""
                 SELECT id, title, body, target, created_by, created_at, updated_at, is_active
@@ -3146,7 +3124,7 @@ def get_active_announcements():
     try:
         user_role = request.current_user.get('role', 'student')
         with db_connection(AUTH_DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
+            # row_factory handled by db_cursor
             cursor = conn.cursor()
             cursor.execute(adapt_query("""
                 SELECT id, title, body, target, created_at
@@ -3169,9 +3147,7 @@ def get_active_announcements():
 def admin_report_tickets():
     """Department-wise ticket breakdown."""
     try:
-        with db_connection('tickets') as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        with db_cursor('tickets', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT
                     COALESCE(department, 'Unknown') as department,
@@ -3207,8 +3183,7 @@ def admin_report_email_usage():
 
     # Student emails from faculty_data.db
     try:
-        with db_connection('faculty_data') as conn:
-            cursor = conn.cursor()
+        with db_cursor('faculty_data') as cursor:
             cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests"))
             result['student']['total'] = cursor.fetchone()[0]
             cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE DATE(created_at) >= ?"), (week_ago,))
@@ -3218,8 +3193,7 @@ def admin_report_email_usage():
 
     # Faculty sent emails from faculty_data.db
     try:
-        with db_connection('faculty_data') as conn:
-            cursor = conn.cursor()
+        with db_cursor('faculty_data') as cursor:
             # Check if sent_emails table exists (SQLite approach)
             if not is_postgres():
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_emails'")

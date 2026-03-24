@@ -67,13 +67,24 @@ def get_db_connection(module: str = 'students'):
             conn = psycopg2.connect(database_url)
             return conn
         except ImportError:
+            if os.getenv('VERCEL'):
+                raise RuntimeError("psycopg2-binary not found. Cannot run on Vercel without Postgres driver.")
             print("[WARN] psycopg2 not installed. Falling back to SQLite.")
         except Exception as e:
+            if os.getenv('VERCEL'):
+                raise RuntimeError(f"Postgres connection failed on Vercel: {e}")
             print(f"[WARN] Postgres connection failed: {e}. Falling back to SQLite.")
 
-    # SQLite fallback
+    # SQLite fallback (RESTRICED ON VERCEL)
+    if os.getenv('VERCEL'):
+        raise RuntimeError(f"Database fallback to SQLite detected for module '{module}'. This is NOT allowed on Vercel's read-only filesystem. Ensure USE_POSTGRES=true and DATABASE_URL is correct.")
+
     db_path = SQLITE_PATHS.get(module, SQLITE_PATHS['students'])
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    except OSError:
+        pass # Handle case where dir might exist or permissions are weird
+        
     conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")

@@ -572,19 +572,25 @@ def init_auth_database(db_path=None):
     if db_path is None:
         db_path = AUTH_DB_PATH
 
-    if not is_postgres():
-        try:
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        except OSError:
-            pass
+    if is_postgres():
+        print("[OK] Auth database using PostgreSQL backend")
+        return
+
+    # Skip filesystem ops on Vercel
+    if os.getenv('VERCEL'):
+        return
+
+    try:
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    except OSError:
+        pass
 
     conn = get_db_connection('students')
     cursor = conn.cursor()
 
-    if not is_postgres():
-        # Enable WAL mode for better concurrent performance
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("PRAGMA foreign_keys=ON;")
+    # Enable WAL mode for better concurrent performance
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA foreign_keys=ON;")
 
     # --- Core user account table ---
     cursor.execute("""
@@ -775,24 +781,29 @@ def init_faculty_database(db_path=None):
         init_auth_database()
         return
 
+    # Skip filesystem ops on Vercel
+    if os.getenv('VERCEL'):
+        return
+
     # Local SQLite fallback
     old_faculty_db = 'data/faculty.db'
     try:
         os.makedirs('data', exist_ok=True)
-        conn = sqlite3.connect(old_faculty_db)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS otp_verification (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL,
-                otp_code TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL,
-                is_used INTEGER DEFAULT 0
-            )
-        """)
-        conn.commit()
-        conn.close()
+        from core.db_config import get_db_connection
+        with get_db_connection('students') as conn:
+            cursor = conn.cursor()
+            if not is_postgres():
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS otp_verification (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT NOT NULL,
+                        otp_code TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        expires_at TIMESTAMP NOT NULL,
+                        is_used INTEGER DEFAULT 0
+                    )
+                """)
+                conn.commit()
     except Exception:
         pass
 

@@ -86,7 +86,7 @@ class StudentRecordsRepository:
         from core.db_config import is_postgres, adapt_query
         try:
             with get_db_connection('students') as conn:
-                cur = conn.cursor()
+                cur = self._get_cursor(conn)
                 if not is_postgres():
                     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
                 else:
@@ -102,13 +102,16 @@ class StudentRecordsRepository:
 
     def _connect(self):
         from core.db_config import get_db_connection
-        conn = get_db_connection('students')
-        conn.row_factory = sqlite3.Row
-        return conn
+        return get_db_connection('students')
+
+    def _get_cursor(self, conn):
+        from core.db_config import get_dict_cursor
+        return get_dict_cursor(conn)
 
     def _rows_to_dicts(self, rows) -> List[Dict]:
-        """Convert sqlite3.Row objects to plain dicts."""
-        return [dict(r) for r in rows] if rows else []
+        """Ensure rows are plain dicts (handles both backends)."""
+        if not rows: return []
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Query: by email (exact match)
@@ -125,7 +128,7 @@ class StudentRecordsRepository:
         from core.db_config import adapt_query
         try:
             conn = self._connect()
-            cur = conn.cursor()
+            cur = self._get_cursor(conn)
             cur.execute(adapt_query(
                 """
                 SELECT full_name, roll_number, email, department, year, section
@@ -160,7 +163,7 @@ class StudentRecordsRepository:
         from core.db_config import adapt_query
         try:
             conn = self._connect()
-            cur = conn.cursor()
+            cur = self._get_cursor(conn)
             if partial:
                 cur.execute(adapt_query(
                     """
@@ -212,7 +215,7 @@ class StudentRecordsRepository:
         from core.db_config import adapt_query
         try:
             conn = self._connect()
-            cur = conn.cursor()
+            cur = self._get_cursor(conn)
 
             clauses = ["LOWER(full_name) LIKE LOWER(?)"]
             params = [f"%{clean_name}%"]
@@ -280,7 +283,7 @@ class StudentRecordsRepository:
         from core.db_config import adapt_query
         try:
             conn = self._connect()
-            cur = conn.cursor()
+            cur = self._get_cursor(conn)
             cur.execute(adapt_query(
                 """
                 SELECT full_name, roll_number, email, department, year, section
@@ -325,7 +328,7 @@ class StudentRecordsRepository:
         from core.db_config import adapt_query
         try:
             conn = self._connect()
-            cur = conn.cursor()
+            cur = self._get_cursor(conn)
             cur.execute(adapt_query(
                 f"""
                 SELECT full_name, roll_number, email, department, year, section

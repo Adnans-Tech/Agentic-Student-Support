@@ -112,15 +112,8 @@ class TicketDatabase:
     
     def _get_connection(self):
         """Get database connection - PostgreSQL or SQLite based on config"""
-        if is_postgres():
-            # Use centralized PostgreSQL connection
-            return get_db_connection('tickets')
-        else:
-            # SQLite fallback with WAL mode
-            conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA foreign_keys=ON;")
-            return conn
+        # Always use the hardened centralized connection factory
+        return get_db_connection('tickets')
     
     def _execute_with_retry(self, operation, *args, **kwargs):
         """Execute a database operation with retry logic for lock errors"""
@@ -486,10 +479,9 @@ class TicketDatabase:
             ''', tuple(params) + (limit,))
             rows = cursor.fetchall()
             conn.close()
-            return [dict(row) for row in rows]
+            return rows # get_dict_cursor already returns dicts
         else:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cursor = get_dict_cursor(conn)
             # Replace %s placeholders with ? for SQLite
             query = f'''
                 SELECT * FROM tickets

@@ -273,10 +273,8 @@ STUDENTS_DB = "data/students.db"
 def _get_faculty_department(faculty_email: str) -> Optional[str]:
     """Look up the faculty's department from students.db → faculty_profiles."""
     try:
-        from core.db_config import adapt_query
-        with get_db_connection('students') as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students', dict_cursor=True) as cur:
             cur.execute(adapt_query("""
                 SELECT fp.department
                 FROM faculty_profiles fp
@@ -397,10 +395,8 @@ EMAIL_DB = "data/faculty_data.db"
 def _get_faculty_email_history(faculty_name: str, limit: int = 10) -> list:
     """Returns recent emails addressed to this faculty (by name match)."""
     try:
-        from core.db_config import adapt_query
-        with get_db_connection('faculty_data') as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
+        from core.db_config import adapt_query, db_cursor
+        with db_cursor('faculty_data', dict_cursor=True) as cur:
             cur.execute(adapt_query(
                 """
                 SELECT id, student_name, student_roll_no, subject, status, timestamp
@@ -1340,18 +1336,16 @@ class FacultyOrchestratorAgent:
             print(f"[FACULTY_ORCH] execute_email_send error: {type(exc).__name__}")
             result = {"success": False, "message": str(exc)}
 
-        if result.get("success"):
             # Log sent email to faculty_sent_emails table
             try:
-                conn = sqlite3.connect(EMAIL_DB, timeout=10)
-                conn.execute(
-                    """INSERT INTO faculty_sent_emails 
-                       (sender_email, sender_name, recipient_email, subject, body)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (faculty_email, faculty_name, draft_to, draft_subj, draft_body)
-                )
-                conn.commit()
-                conn.close()
+                from core.db_config import db_cursor
+                with db_cursor('faculty_data') as cur:
+                    cur.execute(
+                        adapt_query("""INSERT INTO faculty_sent_emails 
+                           (sender_email, sender_name, recipient_email, subject, body)
+                           VALUES (?, ?, ?, ?, ?)"""),
+                        (faculty_email, faculty_name, draft_to, draft_subj, draft_body)
+                    )
                 print(f"[FACULTY_ORCH] Logged sent email to faculty_sent_emails: {draft_to}")
             except Exception as log_exc:
                 print(f"[FACULTY_ORCH] Failed to log sent email: {type(log_exc).__name__}: {log_exc}")
