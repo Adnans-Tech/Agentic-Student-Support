@@ -18,7 +18,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 try:
-    from db_config import is_postgres, get_db_connection, get_placeholder
+    from core.db_config import is_postgres, get_db_connection, get_placeholder
 except ImportError:
     from .db_config import is_postgres, get_db_connection, get_placeholder
 

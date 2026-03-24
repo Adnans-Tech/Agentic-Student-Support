@@ -1,138 +1,197 @@
 """
-Vector Store Management for RAG
-Handles FAISS vector database initialization and semantic search
+Vector Store Management for RAG — Cloud Edition
+Uses Pinecone (cloud vector DB) + HuggingFace Inference API (cloud embeddings)
+
+Replaces: local FAISS + local sentence-transformers (was causing 7.5GB Vercel bundle)
+Now:       Pinecone API + HuggingFace API (tiny HTTP clients, ~5MB total)
 """
 import os
 import sys
 sys.path.append('..')
 
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from core.config import VECTOR_STORE_PATH, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from core.config import CHUNK_SIZE, CHUNK_OVERLAP
+
+
+def _get_embeddings():
+    """
+    Get HuggingFace Inference API embeddings client.
+    Uses the cloud API instead of downloading the model locally.
+    Model: sentence-transformers/all-MiniLM-L6-v2 (384 dimensions)
+    """
+    from langchain_huggingface import HuggingFaceEndpointEmbeddings
+
+    api_key = os.getenv('HUGGINGFACE_API_KEY')
+    model = os.getenv('EMBEDDING_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
+
+    if not api_key:
+        raise ValueError("[ERROR] HUGGINGFACE_API_KEY not set in environment variables.")
+
+    # Use the new router.huggingface.co URL format as required by HF
+    return HuggingFaceEndpointEmbeddings(
+        model=f"https://router.huggingface.co/hf-inference/models/{model}",
+        huggingfacehub_api_token=api_key,
+        task="feature-extraction"
+    )
+
+
+def _get_pinecone_vectorstore(embeddings):
+    """
+    Connect to the existing Pinecone index.
+    Index must already exist with 384 dimensions and cosine metric.
+    """
+    from langchain_pinecone import PineconeVectorStore
+    from pinecone import Pinecone
+
+    api_key = os.getenv('PINECONE_API_KEY')
+    index_name = os.getenv('PINECONE_INDEX_NAME', 'ace-support')
+
+    if not api_key:
+        raise ValueError("[ERROR] PINECONE_API_KEY not set in environment variables.")
+
+    pc = Pinecone(api_key=api_key)
+    index = pc.Index(index_name)
+
+    return PineconeVectorStore(index=index, embedding=embeddings)
 
 
 class VectorStoreManager:
-    """Manages vector database for college rules RAG"""
-    
+    """
+    Manages the Pinecone cloud vector database for college rules RAG.
+    Replaces the old FAISS-based local vector store.
+    """
+
     def __init__(self, rules_file='data/college_rules.txt'):
         self.rules_file = rules_file
-        self.vector_store_path = VECTOR_STORE_PATH
-        self.embeddings = None  # Lazy — loaded on first use
+        self.embeddings = None
         self.vectorstore = None
         self._initialized = False
-    
+
     def _ensure_initialized(self):
-        """Lazy-load the HuggingFace embedding model on first use."""
+        """Lazy-load the cloud embedding client on first use."""
         if not self._initialized:
-            print("[INFO] Loading embedding model (first use)...")
-            self.embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+            print("[INFO] Connecting to HuggingFace Inference API for embeddings...")
+            self.embeddings = _get_embeddings()
             self._initialized = True
-            print("[OK] Embedding model loaded")
-        
+            print("[OK] HuggingFace Embeddings API client ready (no local model download)")
+
     def load_and_split_documents(self):
-        """Load college rules and split into chunks"""
+        """Load college rules and split into chunks for ingestion."""
         try:
             with open(self.rules_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
-            # Create document
+
             doc = Document(page_content=content, metadata={"source": "college_rules.txt"})
-            
-            # Split into chunks
+
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=CHUNK_SIZE,
                 chunk_overlap=CHUNK_OVERLAP,
                 separators=["\n\n", "\n", " ", ""]
             )
-            
+
             chunks = text_splitter.split_documents([doc])
             print(f"[OK] Split college rules into {len(chunks)} chunks")
             return chunks
-            
+
         except Exception as e:
             print(f"[ERROR] Error loading documents: {e}")
             return []
-    
+
     def initialize_vectorstore(self):
-        """Create or load vector store"""
+        """
+        Connect to the Pinecone cloud index.
+        Data is already there permanently — no re-ingestion needed unless you run
+        the migration script (scripts/migrate_to_pinecone.py).
+        """
         self._ensure_initialized()
-        
-        # Check if vector store exists
-        if os.path.exists(self.vector_store_path) and os.path.exists(f"{self.vector_store_path}/index.faiss"):
-            try:
-                print("[INFO] Loading existing vector store...")
-                self.vectorstore = FAISS.load_local(
-                    self.vector_store_path, 
-                    self.embeddings,
-                    allow_dangerous_deserialization=True
-                )
-                print("[OK] Vector store loaded successfully")
-                return self.vectorstore
-            except Exception as e:
-                print(f"[WARN] Could not load existing vector store: {e}")
-                print("Creating new vector store...")
-        
-        # Create new vector store
-        print("[INFO] Creating new vector store...")
-        documents = self.load_and_split_documents()
-        
-        if not documents:
-            raise Exception("No documents to create vector store")
-        
-        self.vectorstore = FAISS.from_documents(documents, self.embeddings)
-        
-        # Save vector store
-        os.makedirs(self.vector_store_path, exist_ok=True)
-        self.vectorstore.save_local(self.vector_store_path)
-        print(f"[OK] Vector store created and saved to {self.vector_store_path}")
-        
+        print("[INFO] Connecting to Pinecone cloud vector store...")
+        self.vectorstore = _get_pinecone_vectorstore(self.embeddings)
+        print("[OK] Pinecone vector store connected successfully")
         return self.vectorstore
-    
+
+    def ingest_documents(self):
+        """
+        One-time: upload college rules documents into Pinecone.
+        Run this locally once via: python agents/vector_store.py
+        No need to run again unless college_rules.txt changes.
+        """
+        import time
+        self._ensure_initialized()
+        documents = self.load_and_split_documents()
+
+        if not documents:
+            raise Exception("No documents to ingest into Pinecone")
+
+        print(f"[INFO] Uploading {len(documents)} chunks to Pinecone sequentially to respect HuggingFace API limits...")
+        
+        from langchain_pinecone import PineconeVectorStore
+        from pinecone import Pinecone
+        api_key = os.getenv('PINECONE_API_KEY')
+        index_name = os.getenv('PINECONE_INDEX_NAME', 'ace-support')
+        pc = Pinecone(api_key=api_key)
+        index = pc.Index(index_name)
+        
+        # Connect to existing store
+        self.vectorstore = PineconeVectorStore(index=index, embedding=self.embeddings)
+
+        for i, doc in enumerate(documents):
+            print(f"[INFO] Uploading chunk {i+1}/{len(documents)}...")
+            try:
+                # Upload one by one
+                self.vectorstore.add_documents([doc])
+                time.sleep(1) # Be nice to the free HuggingFace API
+            except Exception as e:
+                print(f"[WARN] Failed to upload chunk {i+1}: {e}")
+                print("[INFO] Waiting 5 seconds before retrying...")
+                time.sleep(5)
+                self.vectorstore.add_documents([doc])
+
+        print(f"[OK] Successfully uploaded chunks to Pinecone index '{index_name}'")
+
     def get_retriever(self, k=3):
-        """Get retriever for semantic search"""
+        """Get retriever for semantic search against Pinecone."""
         if not self.vectorstore:
             self.initialize_vectorstore()
-        
+
         return self.vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": k}
         )
-    
+
     def search(self, query, k=3):
-        """Perform semantic search"""
+        """Perform semantic search against Pinecone."""
         if not self.vectorstore:
             self.initialize_vectorstore()
-        
+
         results = self.vectorstore.similarity_search(query, k=k)
         return results
 
 
 def initialize_vector_store():
-    """Helper function to initialize vector store"""
+    """Connect to the Pinecone vector store (for use at startup)."""
     print("\n" + "=" * 60)
-    print("  Initializing Vector Database for RAG")
+    print("  Connecting to Pinecone Cloud Vector Store")
     print("=" * 60 + "\n")
-    
+
     manager = VectorStoreManager()
     manager.initialize_vectorstore()
-    
+
     print("\n" + "=" * 60)
-    print("  Vector Database Ready!")
+    print("  Pinecone Vector Store Ready!")
     print("=" * 60 + "\n")
-    
+
     return manager
 
 
 # =============================================================================
-# SINGLETON INSTANCE — prevents duplicate ML model loading
+# SINGLETON INSTANCE — prevents duplicate API client creation
 # =============================================================================
 _vector_store_instance = None
 
+
 def get_vector_store_manager(rules_file='data/college_rules.txt') -> VectorStoreManager:
-    """Get singleton VectorStoreManager — prevents loading the HuggingFace
-    embedding model (~400MB) multiple times."""
+    """Get singleton VectorStoreManager — prevents creating multiple API clients."""
     global _vector_store_instance
     if _vector_store_instance is None:
         _vector_store_instance = VectorStoreManager(rules_file=rules_file)
@@ -140,5 +199,8 @@ def get_vector_store_manager(rules_file='data/college_rules.txt') -> VectorStore
 
 
 if __name__ == "__main__":
-    # Test vector store initialization
-    initialize_vector_store()
+    # Run this once locally to upload your college_rules.txt to Pinecone
+    print("Running one-time document ingestion into Pinecone...")
+    manager = VectorStoreManager()
+    manager.ingest_documents()
+    print("Done! Your Pinecone index is now populated.")

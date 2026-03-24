@@ -1,8 +1,0 @@
-OK  core.config
-OK  utils.auth_utils (all 26 symbols)
-OK  core.db_config
-OK  init_auth_database()
-OK  init_faculty_database()
-OK  agents.faculty_db
-
->>> ALL STARTUP IMPORTS AND INITS PASSED <<<

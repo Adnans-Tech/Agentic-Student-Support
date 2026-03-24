@@ -1,0 +1,231 @@
+﻿.\.venv312\Scripts\p
+ython.exe : 
+Traceback (most 
+recent call last):
+At line:1 char:1
++ .\.venv312\Scripts
+\python.exe scripts/
+migrate_to_pinecone.
+py 2>&1 | O ...
++ ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+~~~~~~~
+    + CategoryInfo  
+            : NotS  
+  pecified: (Trac   
+ eback (most rec    
+ent call last):    
+:String) [], Re    
+moteException
+    + FullyQualifie 
+   dErrorId : Nati  
+  veCommandError
+ 
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\hugging
+face_hub\utils\_http
+.py", line 761, in 
+hf_raise_for_status
+    response.raise_f
+or_status()
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\httpx\_
+models.py", line 
+829, in 
+raise_for_status
+    raise HTTPStatus
+Error(message, 
+request=request, 
+response=self)
+httpx.HTTPStatusErro
+r: Client error 
+'410 Gone' for url '
+https://api-inferenc
+e.huggingface.co/pip
+eline/feature-extrac
+tion/sentence-transf
+ormers/all-MiniLM-L6
+-v2'
+For more 
+information check: h
+ttps://developer.moz
+illa.org/en-US/docs/
+Web/HTTP/Status/410
+
+The above exception 
+was the direct 
+cause of the 
+following exception:
+
+Traceback (most 
+recent call last):
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\scripts\migrat
+e_to_pinecone.py", 
+line 44, in main
+    manager.ingest_d
+ocuments()
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\agents\vector_
+store.py", line 
+133, in 
+ingest_documents
+    PineconeVectorSt
+ore.from_documents(
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\langcha
+in_core\vectorstores
+\base.py", line 
+814, in 
+from_documents
+    return cls.from_
+texts(texts, 
+embedding, metadatas
+=metadatas, 
+**kwargs)
+           ^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\langcha
+in_pinecone\vectorst
+ores.py", line 978, 
+in from_texts
+    
+pinecone.add_texts(
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\langcha
+in_pinecone\vectorst
+ores.py", line 357, 
+in add_texts
+    embeddings = sel
+f._embedding.embed_d
+ocuments(chunk_texts
+)
+                 ^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\langcha
+in_huggingface\embed
+dings\huggingface_en
+dpoint.py", line 
+129, in 
+embed_documents
+    responses = self
+.client.feature_extr
+action(text=texts, 
+**_model_kwargs)
+                ^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\hugging
+face_hub\inference\_
+client.py", line 
+1106, in 
+feature_extraction
+    response = self.
+_inner_post(request_
+parameters)
+               ^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\hugging
+face_hub\inference\_
+client.py", line 
+286, in _inner_post
+    hf_raise_for_sta
+tus(response)
+  File 
+"C:\Users\mohd 
+adnan\Desktop\ACE SU
+PPORT\.venv312\Lib\s
+ite-packages\hugging
+face_hub\utils\_http
+.py", line 889, in 
+hf_raise_for_status
+    raise _format(Hf
+HubHTTPError, 
+str(e), response) 
+from e
+huggingface_hub.erro
+rs.HfHubHTTPError: 
+Client error '410 
+Gone' for url 'https
+://api-inference.hug
+gingface.co/pipeline
+/feature-extraction/
+sentence-transformer
+s/all-MiniLM-L6-v2' 
+(Request ID: Root=1-
+69c2ab01-36068d844af
+54ca5268f6e4b;0033d5
+99-e0d8-4374-93fa-7d
+980014ce98)
+For more 
+information check: h
+ttps://developer.moz
+illa.org/en-US/docs/
+Web/HTTP/Status/410
+
+https://api-inferenc
+e.huggingface.co is 
+no longer 
+supported. Please 
+use https://router.h
+uggingface.co 
+instead.
+============================================================
+  ACE Support ù Pinecone Migration Script
+============================================================
+
+[INFO] Reading: data/college_rules.txt
+[INFO] This will upload your university rules to Pinecone cloud...
+[INFO] This may take 1-2 minutes on first run.
+
+[Γ£ô] SENDGRID: API key loaded successfully (format valid)
+[Γ£ô] DATABASE: Using PostgreSQL backend
+[WARN] ChromaDB not available. Using fallback backend.
+[INFO] Connecting to HuggingFace Inference API for embeddings...
+[OK] HuggingFace Embeddings API client ready (no local model download)
+[OK] Split college rules into 27 chunks
+[INFO] Uploading 27 chunks to Pinecone...
+
+[ERROR] Migration failed: Client error '410 Gone' for url 'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2' (Request ID: Root=1-69c2ab01-36068d844af54ca5268f6e4b;0033d599-e0d8-4374-93fa-7d980014ce98)
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/410
+
+https://api-inference.huggingface.co is no longer supported. Please use https://router.huggingface.co instead.
