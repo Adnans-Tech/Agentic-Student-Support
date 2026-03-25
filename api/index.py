@@ -154,6 +154,39 @@ def health_check():
 def ping():
     return jsonify({"message": "pong", "version": "1.1.0"})
 
+@app.route('/api/debug/db-test')
+def db_test():
+    import psycopg2
+    results = {}
+    
+    # 1. Pooler URL (User's URL)
+    pooler_url = "postgresql://postgres.xonrrowhhaoogktshslf:Adnan06351281@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres"
+    try:
+        conn = psycopg2.connect(pooler_url, sslmode='require', connect_timeout=5)
+        results['pooler_basic'] = 'SUCCESS'
+        conn.close()
+    except Exception as e:
+        results['pooler_basic'] = str(e)
+        
+    # 2. Pooler URL + pgbouncer flag
+    try:
+        conn = psycopg2.connect(f"{pooler_url}?pgbouncer=true", sslmode='require', connect_timeout=5)
+        results['pooler_pgbouncer'] = 'SUCCESS'
+        conn.close()
+    except Exception as e:
+        results['pooler_pgbouncer'] = str(e)
+
+    # 3. Direct IPv6 string
+    direct_url = "postgresql://postgres:Adnan06351281@db.xonrrowhhaoogktshslf.supabase.co:5432/postgres"
+    try:
+        conn = psycopg2.connect(direct_url, sslmode='require', connect_timeout=5)
+        results['direct_ipv6'] = 'SUCCESS'
+        conn.close()
+    except Exception as e:
+        results['direct_ipv6'] = str(e)
+
+    return jsonify(results)
+
 
 # ============================================
 # Unified Authentication Endpoints
