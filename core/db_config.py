@@ -48,6 +48,37 @@ SQLITE_PATHS = {
 # Connection Factory
 # ============================================
 
+def _get_vercel_safe_db_url(database_url: str) -> str:
+    """
+    On Vercel serverless, direct Postgres connections on port 5432 fail.
+    Supabase requires the Session Mode Pooler on port 6543.
+    This function auto-transforms the URL if on Vercel.
+    """
+    if not os.getenv('VERCEL'):
+        return database_url  # local dev: use direct connection
+
+    # Transform: replace host 'db.xxx' with 'aws-0-xxx.pooler.supabase.com'
+    # and port 5432 with 6543 for Supabase session mode pooler
+    import re
+
+    # If already using pooler URL, return as-is
+    if '6543' in database_url or 'pooler.supabase.com' in database_url:
+        return database_url
+
+    # Replace port 5432 -> 6543 for Supabase pooler
+    url = re.sub(r':5432', ':6543', database_url)
+    
+    # Replace direct host (db.xxx.supabase.co) with pooler host
+    # Pattern: db.PROJECTREF.supabase.co -> aws-0-REGION.pooler.supabase.com
+    # Since we don't know region, try just switching port first.
+    # The user may also need to set SUPABASE_DB_URL_POOLER as a separate env var.
+    pooler_url = os.getenv('SUPABASE_DB_URL_POOLER')
+    if pooler_url:
+        return pooler_url
+
+    return url
+
+
 def get_db_connection(module: str = 'students'):
     """
     Get a database connection for the specified module.
@@ -64,7 +95,18 @@ def get_db_connection(module: str = 'students'):
         try:
             import psycopg2
             database_url = os.getenv('DATABASE_URL')
-            conn = psycopg2.connect(database_url)
+            # On Vercel, use pooler-friendly URL
+            database_url = _get_vercel_safe_db_url(database_url)
+            conn = psycopg2.connect(
+                database_url,
+                connect_timeout=15,
+                sslmode='require',
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=5,
+                keepalives_count=5,
+            )
+            conn.autocommit = False
             return conn
         except ImportError:
             if os.getenv('VERCEL'):
