@@ -24,6 +24,8 @@ from core.db_config import (
     get_placeholder,
     is_postgres,
     db_connection,
+    db_cursor,
+    adapt_query,
     get_dict_cursor
 )
 
