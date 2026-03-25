@@ -56,19 +56,7 @@ from utils.auth_utils import (
     VALID_YEARS,
     ADMIN_FACULTY_EMAIL,
     FACULTY_EMAIL_DOMAIN,
-)# --- Health Check ---
-@app.route('/api/health')
-def health_check():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "environment": "vercel" if os.getenv('VERCEL') else "local",
-        "database": "postgres" if os.getenv('USE_POSTGRES') == 'true' else "sqlite"
-    })
-
-@app.route('/api/v1/ping')
-def ping():
-    return jsonify({"message": "pong", "version": "1.1.0"})
+)
 from core.config import FRONTEND_URL
 
 app = Flask(__name__)
@@ -148,6 +136,21 @@ def console_print(msg):
          print(msg)
 
 console_print("\n[OK] Serverless-safe agent registry ready.")
+
+
+# --- Health Check / Ping Endpoints (defined AFTER app is initialized) ---
+@app.route('/api/health')
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "environment": "vercel" if os.getenv('VERCEL') else "local",
+        "database": "postgres" if os.getenv('USE_POSTGRES') == 'true' else "sqlite"
+    })
+
+@app.route('/api/v1/ping')
+def ping():
+    return jsonify({"message": "pong", "version": "1.1.0"})
 
 
 # ============================================
