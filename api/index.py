@@ -377,9 +377,12 @@ Student Support Team
         })
 
     except Exception as e:
-        print(f"Registration Error: {str(e)}")
-        log_auth_event(data.get('email', ''), 'register', success=False, details=str(e), req=request)
-        return jsonify({'success': False, 'error': 'Registration failed. Please try again.'}), 500
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Registration Error: {str(e)}\n{tb}")
+        email_for_log = data.get('email', '') if 'data' in dir() else 'unknown'
+        log_auth_event(email_for_log, 'register', success=False, details=str(e), req=request)
+        return jsonify({'success': False, 'error': str(e), 'debug': tb[-500:]}), 500
 
 
 @app.route('/api/auth/send-otp', methods=['POST'])
