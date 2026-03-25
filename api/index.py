@@ -194,149 +194,151 @@ def register_user():
                 'rate_limited': True
             }), 429
 
-        # Check if email already exists in users table
+        # Wrap the whole registration in one cursor/transaction
         with db_cursor('students') as cursor:
+            # Check if email already exists in users table
             cursor.execute(adapt_query("SELECT id, email_verified FROM users WHERE email = ?"), (email,))
             existing_user = cursor.fetchone()
-        is_reregistration = False
-        if existing_user:
-            existing_user_id = existing_user[0]
-            # Allow re-registration: update the password for the existing seeded account
-            # This lets users who were pre-seeded set their own password
-            password_hash = hash_password(password)
-            cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?"),
-                           (password_hash, existing_user_id))
-            is_reregistration = True
-
-        if role == 'student':
-            # --- Student-specific validation ---
-            full_name = (data.get('full_name', '') or '').strip().upper()
-            roll_number = (data.get('roll_number', '') or '').strip().upper()
-            department = (data.get('department', '') or '').strip().upper()
-            year = data.get('year', '')
-            section = (data.get('section', '') or '').strip().upper()
-
-            if not full_name:
-                return jsonify({'success': False, 'error': 'Full name is required'}), 400
-
-            # Validate roll number
-            rn_valid, rn_error = validate_roll_number(roll_number)
-            if not rn_valid:
-                return jsonify({'success': False, 'error': rn_error}), 400
-
-            # Validate department
-            dep_valid, dep_error = validate_department(department)
-            if not dep_valid:
-                return jsonify({'success': False, 'error': dep_error}), 400
-
-            # Validate year
-            try:
-                year = int(year)
-                if year not in VALID_YEARS:
-                    raise ValueError
-            except (ValueError, TypeError):
-                return jsonify({'success': False, 'error': 'Year must be 1, 2, 3, or 4'}), 400
-
-            # Validate section
-            sec_valid, sec_error = validate_section(section)
-            if not sec_valid:
-                return jsonify({'success': False, 'error': sec_error}), 400
-
-            # Check duplicate roll number (skip for re-registration — the roll belongs to this user)
-            if not is_reregistration:
-                cursor.execute(adapt_query("SELECT id FROM students WHERE roll_number = ?"), (roll_number,))
-                if cursor.fetchone():
-                    return jsonify({'success': False, 'error': 'This roll number is already registered.'}), 400
-
-            if is_reregistration:
-                # Update existing student profile (password already updated above)
-                user_id = existing_user_id
-                cursor.execute(adapt_query("""
-                    UPDATE students SET full_name = ?, department = ?, year = ?, section = ?
-                    WHERE user_id = ?
-                """), (full_name, department, year, section, user_id))
-            else:
-                # --- Insert new student ---
+            
+            is_reregistration = False
+            if existing_user:
+                existing_user_id = existing_user[0]
+                # Allow re-registration: update the password for the existing seeded account
                 password_hash = hash_password(password)
+                cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?"),
+                               (password_hash, existing_user_id))
+                is_reregistration = True
 
-                cursor.execute(adapt_query("""
-                    INSERT INTO users (role, email, password_hash, email_verified, created_at)
-                    VALUES ('student', ?, ?, 0, ?)
-                """), (email, password_hash, datetime.utcnow()))
-                user_id = cursor.lastrowid
+            if role == 'student':
+                # --- Student-specific validation ---
+                full_name = (data.get('full_name', '') or '').strip().upper()
+                roll_number = (data.get('roll_number', '') or '').strip().upper()
+                department = (data.get('department', '') or '').strip().upper()
+                year = data.get('year', '')
+                section = (data.get('section', '') or '').strip().upper()
 
-                # Handle SERIAL vs lastrowid
-                if not user_id and is_postgres():
-                    cursor.execute("SELECT LASTVAL()")
-                    user_id = cursor.fetchone()[0]
+                if not full_name:
+                    return jsonify({'success': False, 'error': 'Full name is required'}), 400
 
-                cursor.execute(adapt_query("""
-                    INSERT INTO students (user_id, email, roll_number, full_name, password_hash,
-                                          department, year, section, is_verified, created_at)
-                    VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
-                """), (user_id, email, roll_number, full_name, department, year, section, datetime.utcnow()))
+                # Validate roll number
+                rn_valid, rn_error = validate_roll_number(roll_number)
+                if not rn_valid:
+                    return jsonify({'success': False, 'error': rn_error}), 400
 
-            log_auth_event(email, 'register', success=True, details=f'Student registered: {roll_number}', req=request)
+                # Validate department
+                dep_valid, dep_error = validate_department(department)
+                if not dep_valid:
+                    return jsonify({'success': False, 'error': dep_error}), 400
 
-        elif role == 'faculty':
-            # --- Faculty-specific validation ---
-            full_name = (data.get('full_name', '') or '').strip().upper()
-            employee_id = (data.get('employee_id', '') or '').strip().upper()
-            department = (data.get('department', '') or '').strip().upper()
-            designation = (data.get('designation', '') or '').strip()
-            subject_incharge = (data.get('subject_incharge', '') or '').strip()
-            class_incharge = (data.get('class_incharge', '') or '').strip().upper()
+                # Validate year
+                try:
+                    year = int(year)
+                    if year not in VALID_YEARS:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    return jsonify({'success': False, 'error': 'Year must be 1, 2, 3, or 4'}), 400
 
-            if not full_name:
-                return jsonify({'success': False, 'error': 'Full name is required'}), 400
+                # Validate section
+                sec_valid, sec_error = validate_section(section)
+                if not sec_valid:
+                    return jsonify({'success': False, 'error': sec_error}), 400
 
-            # Validate faculty email domain
-            fe_valid, fe_error = validate_faculty_email(email)
-            if not fe_valid:
-                return jsonify({'success': False, 'error': fe_error}), 400
+                # Check duplicate roll number (skip for re-registration)
+                if not is_reregistration:
+                    cursor.execute(adapt_query("SELECT id FROM students WHERE roll_number = ?"), (roll_number,))
+                    if cursor.fetchone():
+                        return jsonify({'success': False, 'error': 'This roll number is already registered.'}), 400
 
-            # Validate department
-            dep_valid, dep_error = validate_department(department)
-            if not dep_valid:
-                return jsonify({'success': False, 'error': dep_error}), 400
+                if is_reregistration:
+                    user_id = existing_user_id
+                    cursor.execute(adapt_query("""
+                        UPDATE students SET full_name = ?, department = ?, year = ?, section = ?
+                        WHERE user_id = ?
+                    """), (full_name, department, year, section, user_id))
+                else:
+                    # --- Insert new student ---
+                    password_hash = hash_password(password)
+                    ts_now = datetime.utcnow()
 
-            # Check duplicate employee_id if provided (skip for re-registration)
-            if employee_id and not is_reregistration:
-                cursor.execute(adapt_query("SELECT id FROM faculty_profiles WHERE employee_id = ?"), (employee_id,))
-                if cursor.fetchone():
-                    return jsonify({'success': False, 'error': 'This employee ID is already registered.'}), 400
+                    if is_postgres():
+                        cursor.execute("""
+                            INSERT INTO users (role, email, password_hash, email_verified, created_at)
+                            VALUES ('student', %s, %s, 0, %s) RETURNING id
+                        """, (email, password_hash, ts_now))
+                        user_id = cursor.fetchone()[0]
+                    else:
+                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('student', ?, ?, 0, ?)",
+                                       (email, password_hash, ts_now))
+                        user_id = cursor.lastrowid
 
-            if is_reregistration:
-                # Update existing faculty profile (password already updated above)
-                user_id = existing_user_id
-                cursor.execute(adapt_query("""
-                    UPDATE faculty_profiles SET full_name = ?, department = ?,
-                           designation = ?, subject_incharge = ?, class_incharge = ?
-                    WHERE user_id = ?
-                """), (full_name, department, designation, subject_incharge, class_incharge, user_id))
-            else:
-                # --- Insert new faculty ---
-                password_hash = hash_password(password)
+                    cursor.execute(adapt_query("""
+                        INSERT INTO students (user_id, email, roll_number, full_name, password_hash,
+                                              department, year, section, is_verified, created_at)
+                        VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
+                    """), (user_id, email, roll_number, full_name, department, year, section, ts_now))
 
-                cursor.execute(adapt_query("""
-                    INSERT INTO users (role, email, password_hash, email_verified, created_at)
-                    VALUES ('faculty', ?, ?, 0, ?)
-                """), (email, password_hash, datetime.utcnow()))
-                user_id = cursor.lastrowid
+                log_auth_event(email, 'register', success=True, details=f'Student registered: {roll_number}', req=request)
 
-                # Handle SERIAL vs lastrowid
-                if not user_id and is_postgres():
-                    cursor.execute("SELECT LASTVAL()")
-                    user_id = cursor.fetchone()[0]
+            elif role == 'faculty':
+                # --- Faculty-specific validation ---
+                full_name = (data.get('full_name', '') or '').strip().upper()
+                employee_id = (data.get('employee_id', '') or '').strip().upper()
+                department = (data.get('department', '') or '').strip().upper()
+                designation = (data.get('designation', '') or '').strip()
+                subject_incharge = (data.get('subject_incharge', '') or '').strip()
+                class_incharge = (data.get('class_incharge', '') or '').strip().upper()
 
-                cursor.execute(adapt_query("""
-                    INSERT INTO faculty_profiles (user_id, full_name, employee_id, department,
-                                                  designation, subject_incharge, class_incharge, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """), (user_id, full_name, employee_id or None, department,
-                      designation, subject_incharge, class_incharge, datetime.utcnow()))
+                if not full_name:
+                    return jsonify({'success': False, 'error': 'Full name is required'}), 400
 
-            log_auth_event(email, 'register', success=True, details=f'Faculty registered: {full_name}', req=request)
+                # Validate faculty email domain
+                fe_valid, fe_error = validate_faculty_email(email)
+                if not fe_valid:
+                    return jsonify({'success': False, 'error': fe_error}), 400
+
+                # Validate department
+                dep_valid, dep_error = validate_department(department)
+                if not dep_valid:
+                    return jsonify({'success': False, 'error': dep_error}), 400
+
+                # Check duplicate employee_id if provided (skip for re-registration)
+                if employee_id and not is_reregistration:
+                    cursor.execute(adapt_query("SELECT id FROM faculty_profiles WHERE employee_id = ?"), (employee_id,))
+                    if cursor.fetchone():
+                        return jsonify({'success': False, 'error': 'This employee ID is already registered.'}), 400
+
+                if is_reregistration:
+                    # Update existing faculty profile (password already updated above)
+                    user_id = existing_user_id
+                    cursor.execute(adapt_query("""
+                        UPDATE faculty_profiles SET full_name = ?, department = ?,
+                               designation = ?, subject_incharge = ?, class_incharge = ?
+                        WHERE user_id = ?
+                    """), (full_name, department, designation, subject_incharge, class_incharge, user_id))
+                else:
+                    # --- Insert new faculty ---
+                    password_hash = hash_password(password)
+                    ts_now = datetime.utcnow()
+
+                    if is_postgres():
+                        cursor.execute("""
+                            INSERT INTO users (role, email, password_hash, email_verified, created_at)
+                            VALUES ('faculty', %s, %s, 0, %s) RETURNING id
+                        """, (email, password_hash, ts_now))
+                        user_id = cursor.fetchone()[0]
+                    else:
+                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('faculty', ?, ?, 0, ?)",
+                                       (email, password_hash, ts_now))
+                        user_id = cursor.lastrowid
+
+                    cursor.execute(adapt_query("""
+                        INSERT INTO faculty_profiles (user_id, full_name, employee_id, department,
+                                                      designation, subject_incharge, class_incharge, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """), (user_id, full_name, employee_id or None, department,
+                          designation, subject_incharge, class_incharge, ts_now))
+
+                log_auth_event(email, 'register', success=True, details=f'Faculty registered: {full_name}', req=request)
 
         # Auto-send OTP
         try:
