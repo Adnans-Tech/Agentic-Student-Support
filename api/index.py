@@ -217,7 +217,6 @@ def register_user():
             section = (data.get('section', '') or '').strip().upper()
 
             if not full_name:
-                conn.close()
                 return jsonify({'success': False, 'error': 'Full name is required'}), 400
 
             # Validate roll number
@@ -228,7 +227,6 @@ def register_user():
             # Validate department
             dep_valid, dep_error = validate_department(department)
             if not dep_valid:
-                conn.close()
                 return jsonify({'success': False, 'error': dep_error}), 400
 
             # Validate year
@@ -278,9 +276,6 @@ def register_user():
                     VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
                 """), (user_id, email, roll_number, full_name, department, year, section, datetime.utcnow()))
 
-            conn.commit()
-            conn.close()
-
             log_auth_event(email, 'register', success=True, details=f'Student registered: {roll_number}', req=request)
 
         elif role == 'faculty':
@@ -293,7 +288,6 @@ def register_user():
             class_incharge = (data.get('class_incharge', '') or '').strip().upper()
 
             if not full_name:
-                conn.close()
                 return jsonify({'success': False, 'error': 'Full name is required'}), 400
 
             # Validate faculty email domain
@@ -304,7 +298,6 @@ def register_user():
             # Validate department
             dep_valid, dep_error = validate_department(department)
             if not dep_valid:
-                conn.close()
                 return jsonify({'success': False, 'error': dep_error}), 400
 
             # Check duplicate employee_id if provided (skip for re-registration)
@@ -342,9 +335,6 @@ def register_user():
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """), (user_id, full_name, employee_id or None, department,
                       designation, subject_incharge, class_incharge, datetime.utcnow()))
-
-            conn.commit()
-            conn.close()
 
             log_auth_event(email, 'register', success=True, details=f'Faculty registered: {full_name}', req=request)
 
