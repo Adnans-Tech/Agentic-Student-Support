@@ -243,7 +243,7 @@ def register_user():
                 existing_user_id = existing_user[0]
                 # Allow re-registration: update the password for the existing seeded account
                 password_hash = hash_password(password)
-                cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = 0 WHERE id = ?"),
+                cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = FALSE WHERE id = ?"),
                                (password_hash, existing_user_id))
                 is_reregistration = True
 
@@ -301,18 +301,18 @@ def register_user():
                     if is_postgres():
                         cursor.execute("""
                             INSERT INTO users (role, email, password_hash, email_verified, created_at)
-                            VALUES ('student', %s, %s, 0, %s) RETURNING id
+                            VALUES ('student', %s, %s, FALSE, %s) RETURNING id
                         """, (email, password_hash, ts_now))
                         user_id = cursor.fetchone()[0]
                     else:
-                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('student', ?, ?, 0, ?)",
+                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('student', ?, ?, FALSE, ?)",
                                        (email, password_hash, ts_now))
                         user_id = cursor.lastrowid
 
                     cursor.execute(adapt_query("""
                         INSERT INTO students (user_id, email, roll_number, full_name, password_hash,
                                               department, year, section, is_verified, created_at)
-                        VALUES (?, ?, ?, ?, '', ?, ?, ?, 0, ?)
+                        VALUES (?, ?, ?, ?, '', ?, ?, ?, FALSE, ?)
                     """), (user_id, email, roll_number, full_name, department, year, section, ts_now))
 
                 log_auth_event(email, 'register', success=True, details=f'Student registered: {roll_number}', req=request)
@@ -361,11 +361,11 @@ def register_user():
                     if is_postgres():
                         cursor.execute("""
                             INSERT INTO users (role, email, password_hash, email_verified, created_at)
-                            VALUES ('faculty', %s, %s, 0, %s) RETURNING id
+                            VALUES ('faculty', %s, %s, FALSE, %s) RETURNING id
                         """, (email, password_hash, ts_now))
                         user_id = cursor.fetchone()[0]
                     else:
-                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('faculty', ?, ?, 0, ?)",
+                        cursor.execute("INSERT INTO users (role, email, password_hash, email_verified, created_at) VALUES ('faculty', ?, ?, FALSE, ?)",
                                        (email, password_hash, ts_now))
                         user_id = cursor.lastrowid
 
@@ -538,7 +538,7 @@ def verify_otp_endpoint():
         # Mark email as verified and fetch all needed data in one transaction
         user_response = {}
         with db_cursor('students') as cursor:
-            cursor.execute(adapt_query("UPDATE users SET email_verified = 1 WHERE email = ?"), (email,))
+            cursor.execute(adapt_query("UPDATE users SET email_verified = TRUE WHERE email = ?"), (email,))
 
             # Get user info
             cursor.execute(adapt_query("SELECT id, role, email FROM users WHERE email = ?"), (email,))
@@ -554,7 +554,7 @@ def verify_otp_endpoint():
 
             if role == 'student':
                 # Also mark students table
-                cursor.execute(adapt_query("UPDATE students SET is_verified = 1 WHERE user_id = ?"), (user_id,))
+                cursor.execute(adapt_query("UPDATE students SET is_verified = TRUE WHERE user_id = ?"), (user_id,))
                 cursor.execute(adapt_query("""
                     SELECT roll_number, full_name, department, year, section
                     FROM students WHERE user_id = ?
