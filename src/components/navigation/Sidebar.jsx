@@ -26,7 +26,7 @@ import { getCurrentUser, isAdmin } from '../../utils/auth';
 import authService from '../../services/authService';
 import styles from './Sidebar.module.css';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const STUDENT_NAV = [
     { path: '/student/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
