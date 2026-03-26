@@ -23,7 +23,7 @@ else:
     print(f"[âš ] SENDGRID: Key prefix: {SENDGRID_API_KEY[:10]}...")
 
 # Email Configuration
-NOTIFICATION_EMAIL_FROM = os.getenv('NOTIFICATION_EMAIL_FROM', 'mohdadnan2k4@gmail.com')
+NOTIFICATION_EMAIL_FROM = os.getenv('NOTIFICATION_EMAIL_FROM', 'mailtomohdadnan@gmail.com')
 DEFAULT_FACULTY_EMAIL = "hod@college.edu"  # Fallback recipient if faculty resolution fails
 
 # JWT Authentication Configuration

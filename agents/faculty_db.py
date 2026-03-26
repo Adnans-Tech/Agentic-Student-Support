@@ -55,6 +55,13 @@ class FacultyDatabase:
         last_error = None
         delay = RETRY_DELAY
 
+        # Support both SQLite and Postgres transient errors
+        try:
+            import psycopg2
+            _retryable_errors = (sqlite3.OperationalError, psycopg2.OperationalError)
+        except ImportError:
+            _retryable_errors = (sqlite3.OperationalError,)
+
         for attempt in range(MAX_RETRIES):
             conn = None
             try:
@@ -62,11 +69,11 @@ class FacultyDatabase:
                 result = operation(conn, *args, **kwargs)
                 conn.commit()
                 return result
-            except sqlite3.OperationalError as e:
+            except _retryable_errors as e:
                 last_error = e
                 error_msg = str(e).lower()
 
-                if "locked" in error_msg or "busy" in error_msg:
+                if "locked" in error_msg or "busy" in error_msg or "could not connect" in error_msg:
                     if conn:
                         try:
                             conn.rollback()
@@ -74,7 +81,7 @@ class FacultyDatabase:
                             pass
 
                     if attempt < MAX_RETRIES - 1:
-                        print(f"[FACULTY_DB] Database locked, retrying in {delay:.2f}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                        print(f"[FACULTY_DB] Database locked/busy, retrying in {delay:.2f}s (attempt {attempt + 1}/{MAX_RETRIES})")
                         time.sleep(delay)
                         delay *= 1.5
                         continue
@@ -666,51 +673,53 @@ class FacultyDatabase:
     def get_all_faculty(self) -> List[Dict]:
         """
         Get all faculty members for fuzzy matching
-        
+
         Returns:
             List of faculty dicts
         """
         conn = self.get_connection()
+        table_name = 'faculty_directory' if is_postgres() else 'faculty'
         cursor = get_dict_cursor(conn)
-        
-        cursor.execute("""
+
+        cursor.execute(f"""
             SELECT faculty_id, name, email, designation, department, phone_number as phone
-            FROM faculty
+            FROM {table_name}
             ORDER BY name
         """)
-        
+
         results = cursor.fetchall()
         conn.close()
-        
-        return results
-    
+
+        return list(results)
+
     def search_by_designation(self, designation_query: str) -> List[Dict]:
         """
         Search faculty by designation (for HOD, Dean, etc.)
-        
+
         Args:
             designation_query: Designation to search for
-            
+
         Returns:
             List of matching faculty
         """
         conn = self.get_connection()
+        table_name = 'faculty_directory' if is_postgres() else 'faculty'
         cursor = get_dict_cursor(conn)
         ph = get_placeholder()
-        
+
         # Case-insensitive partial match
         cursor.execute(f"""
-            SELECT faculty_id, name, email, designation, department, phone
-            FROM faculty
+            SELECT faculty_id, name, email, designation, department, phone_number as phone
+            FROM {table_name}
             WHERE LOWER(designation) LIKE LOWER({ph})
             ORDER BY name
         """, (f"%{designation_query}%",))
-        
+
         results = cursor.fetchall()
         conn.close()
-        
+
         print(f"[FACULTY_DB] Designation search for '{designation_query}' found {len(results)} results")
-        return results
+        return list(results)
     
     def check_rate_limit(self, student_email: str) -> Tuple[bool, int, Optional[str]]:
         """

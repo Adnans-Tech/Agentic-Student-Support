@@ -535,7 +535,8 @@ def verify_otp_endpoint():
             log_auth_event(email, 'otp_verify_fail', success=False, details=message, req=request)
             return jsonify({'success': False, 'error': message}), 400
 
-        # Mark email as verified in users table
+        # Mark email as verified and fetch all needed data in one transaction
+        user_response = {}
         with db_cursor('students') as cursor:
             cursor.execute(adapt_query("UPDATE users SET email_verified = 1 WHERE email = ?"), (email,))
 
@@ -543,50 +544,46 @@ def verify_otp_endpoint():
             cursor.execute(adapt_query("SELECT id, role, email FROM users WHERE email = ?"), (email,))
             user = cursor.fetchone()
 
-        if not user:
-            conn.close()
-            return jsonify({'success': False, 'error': 'User not found'}), 404
+            if not user:
+                return jsonify({'success': False, 'error': 'User not found'}), 404
 
-        user_id, role, user_email = user
+            user_id, role, user_email = user
 
-        # Build user response based on role
-        user_response = {'id': user_id, 'email': user_email, 'role': role}
+            # Build user response based on role
+            user_response = {'id': user_id, 'email': user_email, 'role': role}
 
-        if role == 'student':
-            # Also mark students table
-            cursor.execute(adapt_query("UPDATE students SET is_verified = 1 WHERE user_id = ?"), (user_id,))
-            cursor.execute(adapt_query("""
-                SELECT roll_number, full_name, department, year, section
-                FROM students WHERE user_id = ?
-            """), (user_id,))
-            student = cursor.fetchone()
-            if student:
-                user_response.update({
-                    'roll_number': student[0],
-                    'full_name': student[1],
-                    'department': student[2],
-                    'year': student[3],
-                    'section': student[4],
-                })
-        elif role == 'faculty':
-            cursor.execute("""
-                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
-                FROM faculty_profiles WHERE user_id = ?
-            """, (user_id,))
-            faculty = cursor.fetchone()
-            if faculty:
-                user_response.update({
-                    'name': faculty[0],
-                    'full_name': faculty[0],
-                    'employee_id': faculty[1] or '',
-                    'department': faculty[2],
-                    'designation': faculty[3] or '',
-                    'subject_incharge': faculty[4] or '',
-                    'class_incharge': faculty[5] or '',
-                })
-
-        conn.commit()
-        conn.close()
+            if role == 'student':
+                # Also mark students table
+                cursor.execute(adapt_query("UPDATE students SET is_verified = 1 WHERE user_id = ?"), (user_id,))
+                cursor.execute(adapt_query("""
+                    SELECT roll_number, full_name, department, year, section
+                    FROM students WHERE user_id = ?
+                """), (user_id,))
+                student = cursor.fetchone()
+                if student:
+                    user_response.update({
+                        'roll_number': student[0],
+                        'full_name': student[1],
+                        'department': student[2],
+                        'year': student[3],
+                        'section': student[4],
+                    })
+            elif role == 'faculty':
+                cursor.execute(adapt_query("""
+                    SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
+                    FROM faculty_profiles WHERE user_id = ?
+                """), (user_id,))
+                faculty = cursor.fetchone()
+                if faculty:
+                    user_response.update({
+                        'name': faculty[0],
+                        'full_name': faculty[0],
+                        'employee_id': faculty[1] or '',
+                        'department': faculty[2],
+                        'designation': faculty[3] or '',
+                        'subject_incharge': faculty[4] or '',
+                        'class_incharge': faculty[5] or '',
+                    })
 
         # Generate JWT token
         token = generate_jwt_token(user_id=user_id, email=user_email, role=role)
@@ -713,9 +710,6 @@ def login_user():
                     'class_incharge': faculty[5] or '',
                     'timetable': faculty[6] or '{}',
                 })
-
-        conn.commit()
-        conn.close()
 
         # Generate JWT — include is_admin flag so frontend can show admin UI
         token = generate_jwt_token(

@@ -119,7 +119,14 @@ class TicketDatabase:
         """Execute a database operation with retry logic for lock errors"""
         last_error = None
         delay = RETRY_DELAY
-        
+
+        # Support both SQLite and Postgres transient errors
+        try:
+            import psycopg2
+            _retryable_errors = (sqlite3.OperationalError, psycopg2.OperationalError)
+        except ImportError:
+            _retryable_errors = (sqlite3.OperationalError,)
+
         for attempt in range(MAX_RETRIES):
             conn = None
             try:
@@ -127,19 +134,19 @@ class TicketDatabase:
                 result = operation(conn, *args, **kwargs)
                 conn.commit()
                 return result
-            except sqlite3.OperationalError as e:
+            except _retryable_errors as e:
                 last_error = e
                 error_msg = str(e).lower()
-                
-                if "locked" in error_msg or "busy" in error_msg:
+
+                if "locked" in error_msg or "busy" in error_msg or "could not connect" in error_msg:
                     if conn:
                         try:
                             conn.rollback()
                         except:
                             pass
-                    
+
                     if attempt < MAX_RETRIES - 1:
-                        print(f"[TICKET_DB] Database locked, retrying in {delay:.2f}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                        print(f"[TICKET_DB] Database locked/busy, retrying in {delay:.2f}s (attempt {attempt + 1}/{MAX_RETRIES})")
                         time.sleep(delay)
                         delay *= 1.5
                         continue
@@ -158,7 +165,7 @@ class TicketDatabase:
                         conn.close()
                     except:
                         pass
-        
+
         print(f"[TICKET_DB] All {MAX_RETRIES} retries exhausted")
         raise last_error
     
