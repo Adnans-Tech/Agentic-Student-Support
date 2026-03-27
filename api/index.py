@@ -2370,9 +2370,17 @@ def chat_orchestrator():
         # 3. Fallback for testing - use first student if still no user_id
         if not user_id:
             with db_cursor('students') as cursor:
-                cursor.execute(adapt_query("SELECT id FROM students LIMIT 1")) # Get ID instead of email
+                cursor.execute(adapt_query("SELECT email FROM students LIMIT 1"))
                 result = cursor.fetchone()
                 user_id = result[0] if result else "test_user"
+        
+        # 4. Resolve Roll Number to Email if needed
+        if user_id and not ('@' in user_id):
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("SELECT email FROM students WHERE roll_number = ?"), (user_id, ))
+                result = cursor.fetchone()
+                if result:
+                    user_id = result[0]
         
         # Get student profile for context - checking both email and id
         with db_cursor('students', dict_cursor=True) as cursor:
@@ -2440,6 +2448,14 @@ def confirm_chat_action():
                 cursor.execute(adapt_query("SELECT email FROM students LIMIT 1"))
                 result = cursor.fetchone()
                 user_id = result[0] if result else "test@student.com"
+        
+        # Ensure user_id is the EMAIL even if Roll Number was used in token/body
+        if user_id and not ('@' in user_id):
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("SELECT email FROM students WHERE roll_number = ?"), (user_id,))
+                result = cursor.fetchone()
+                if result:
+                    user_id = result[0]
         
         if not confirmed:
             # User cancelled

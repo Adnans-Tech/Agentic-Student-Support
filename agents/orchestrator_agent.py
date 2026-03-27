@@ -334,17 +334,14 @@ RULES:
 - If message is just a greeting/thanks/bye -> GREETING
 
 ENTITY EXTRACTION RULES (CRITICAL):
-- faculty_name: The name of the faculty/professor/teacher mentioned. Strip "Dr.", "Prof.", etc.
+- faculty_name: The name of the faculty/professor/teacher mentioned. Strip "Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", "Madam", "Sir", "HOD", "Dean".
 - email_address: Any email address (user@domain.com)
-- purpose: MUST extract the reason/topic/subject if mentioned. Look for phrases after "about", "regarding", "for", "asking", "to discuss", "to request", "to inquire". NEVER return null for purpose if the user mentions a reason.
-  Examples:
-  - "email my friend asking to return my notes" → purpose: "return my notes"
-  - "email Dr. Kumar about internship" → purpose: "internship"
-  - "send email to test@email.com regarding exam schedule" → purpose: "exam schedule"
-  - "contact faculty for notes" → purpose: "notes"
+- purpose: MUST extract the reason/topic/subject if mentioned. Look for phrases after "about", "regarding", "for", "asking", "to discuss", "to request", "to inquire", "requesting". NEVER return null for purpose if the user mentions a reason.
 - ticket_description: Description of the issue/complaint
 - event_title: Title/name of the calendar event
 - event_date: Date for the calendar event (e.g., "March 5", "2026-03-05")
+
+CRITICAL: Do NOT include the purpose/message in the faculty_name. If a user says "email Dr. Kumar requesting a leave", faculty_name is "Kumar" and purpose is "requesting a leave".
 
 CONVERSATION HISTORY:
 {history_text if history_text else "(none)"}
@@ -1099,8 +1096,8 @@ Return ONLY valid JSON:
                 # Pattern: "email/contact Dr. X about Y"
                 nm_with_purpose = re.search(
                     r'(?:to|email|contact|write\s+to|send\s+(?:an?\s+)?email\s+to)\s+'
-                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*)?'
-                    r'(\w[\w\s]{1,30}?)\s+(?:about|regarding|for|asking|to discuss)\s+(.+?)\s*$',
+                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*|madam\s+|sir\s+)?'
+                    r'(\w[\w\s]{1,30}?)\s+(?:about|regarding|for|asking|to discuss|to request|requesting|inquiring|to inquire)\s+(.+?)\s*$',
                     message, re.IGNORECASE)
                 if nm_with_purpose and len(nm_with_purpose.group(1).strip()) > 1:
                     faculty_name = nm_with_purpose.group(1).strip()
@@ -1163,9 +1160,9 @@ Return ONLY valid JSON:
                 # Try to extract just the name part using regex
                 nm_extract = re.search(
                     r'(?:to|email|contact|send\s+(?:an?\s+)?email\s+to|write\s+to)?\s*'
-                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*)?'
+                    r'(?:dr\.?\s*|prof\.?\s*|professor\s+|mr\.?\s*|mrs?\.?\s*|ms\.?\s*|madam\s+|sir\s+)?'
                     r'([a-zA-Z][a-zA-Z\s]{1,30}?)'
-                    r'(?:\s+(?:about|regarding|for|asking|referring|requesting|to discuss)\s+(.+?))?\s*$',
+                    r'(?:\s+(?:about|regarding|for|asking|referring|requesting|to discuss|to request|inquiring|to inquire)\s+(.+?))?\s*$',
                     message, re.IGNORECASE)
                 if nm_extract and len(nm_extract.group(1).strip()) > 1:
                     faculty_name = nm_extract.group(1).strip()
@@ -1250,7 +1247,10 @@ Return ONLY valid JSON:
     def _search_faculty(self, name, message, user_id, session_id,
                         student_profile, slots, entities):
         try:
-            result = self.faculty_db.search_faculty(name=name)
+            # Pre-clean name: strip common titles that might confuse the search
+            cleaned_name = re.sub(r'\b(dr|prof|professor|mr|mrs|ms|madam|ma\'am|sir|hod|dean)\.?\s+', '', name, flags=re.IGNORECASE).strip()
+            
+            result = self.faculty_db.search_faculty(name=cleaned_name)
             # CRITICAL: Use 'matches' key (list), NOT 'faculty' (can be None or dict)
             matches = result.get("matches", [])
             if matches is None:
@@ -1508,9 +1508,12 @@ Return ONLY valid JSON (no markdown):
             prof_desc = description
 
         student_email = student_profile.get("email", user_id) if student_profile else user_id
+        student_dept = student_profile.get("department", "Other") if student_profile else "Other"
+        
         sub_cat = CATEGORIES.get(category, ["General Query"])[0]
         ticket_data = {
             "student_email": student_email,
+            "department": student_dept,
             "category": category, "sub_category": sub_cat,
             "priority": priority,
             "description": prof_desc, "attachments": []
@@ -1720,6 +1723,8 @@ Return ONLY valid JSON (no markdown):
                             "message": f"🎫 Daily ticket limit reached ({mx}/{mx})."}
                 td = action_data.get("ticket_data", {})
                 td["student_email"] = user_id
+                if not td.get("department") and student_profile:
+                    td["department"] = student_profile.get("department", "Other")
                 # Merge edited fields from frontend if present
                 edited = action_data.get("edited_draft", {})
                 if edited:

@@ -71,6 +71,7 @@ def migrate():
             priority VARCHAR(20),
             subject TEXT NOT NULL,
             description TEXT,
+            department VARCHAR(100),
             status VARCHAR(20) DEFAULT 'Open',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -166,8 +167,9 @@ def migrate():
         cur = conn.cursor()
         
         for cmd in commands:
-            print(f"Executing: {cmd.strip().splitlines()[0]}...")
-            cur.execute(cmd)
+            if cmd.strip():
+                print(f"Executing: {cmd.strip().splitlines()[0]}...")
+                cur.execute(cmd)
 
         # Apply schema upgrades to existing databases
         alter_commands = [
@@ -179,6 +181,7 @@ def migrate():
             "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
             "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20)",
             "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS profile_photo VARCHAR(255)",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS department VARCHAR(100)",
             "ALTER TABLE email_requests RENAME COLUMN purpose TO message",
             "ALTER TABLE email_requests RENAME COLUMN faculty_email TO faculty_id",
             "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS student_roll_no VARCHAR(50)",
@@ -186,6 +189,7 @@ def migrate():
             "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS student_year VARCHAR(10)",
             "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255)"
         ]
+
         for alter in alter_commands:
             print(f"Executing: {alter}...")
             try:

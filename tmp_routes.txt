@@ -1,0 +1,7 @@
+@app.route('/api/v1/faculty/calendar', methods=['GET'])
+@app.route('/api/v1/faculty/calendar', methods=['POST'])
+@app.route('/api/v1/faculty/calendar/<int:event_id>', methods=['PUT'])
+@app.route('/api/v1/faculty/calendar/<int:event_id>', methods=['DELETE'])
+@app.route('/api/calendar/events', methods=['GET'])
+@app.route('/api/calendar/events', methods=['POST'])
+@app.route('/api/calendar/events/<int:event_id>', methods=['DELETE'])

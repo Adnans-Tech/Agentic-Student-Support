@@ -1,0 +1,172 @@
+
+--- students.db: sqlite_sequence ---
+CREATE TABLE sqlite_sequence(name,seq)
+
+--- students.db: student_activity ---
+CREATE TABLE student_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_email TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                action_description TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_email) REFERENCES students(email)
+            )
+
+--- students.db: daily_usage ---
+CREATE TABLE daily_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_email TEXT NOT NULL,
+            usage_date TEXT NOT NULL,
+            emails_sent INTEGER DEFAULT 0,
+            tickets_created INTEGER DEFAULT 0,
+            UNIQUE(student_email, usage_date)
+        )
+
+--- students.db: users ---
+CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT NOT NULL CHECK(role IN ('student', 'faculty')),
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            email_verified INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        , is_admin INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, last_login TIMESTAMP)
+
+--- students.db: students ---
+CREATE TABLE students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            roll_number TEXT UNIQUE NOT NULL,
+            full_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL DEFAULT '',
+            department TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            section TEXT NOT NULL DEFAULT '',
+            phone TEXT DEFAULT '',
+            profile_photo TEXT DEFAULT NULL,
+            is_verified INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+
+--- students.db: faculty_profiles ---
+CREATE TABLE faculty_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE NOT NULL,
+            full_name TEXT NOT NULL,
+            employee_id TEXT UNIQUE,
+            department TEXT NOT NULL,
+            designation TEXT DEFAULT '',
+            subject_incharge TEXT DEFAULT '',
+            class_incharge TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, phone TEXT DEFAULT '', profile_photo TEXT DEFAULT NULL, office_room TEXT DEFAULT '', bio TEXT DEFAULT '', linkedin TEXT DEFAULT '', github TEXT DEFAULT '', researchgate TEXT DEFAULT '', timetable TEXT DEFAULT '{}',
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+
+--- students.db: otp_verification ---
+CREATE TABLE otp_verification (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            code_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 5,
+            last_sent_at TIMESTAMP,
+            is_used INTEGER DEFAULT 0
+        )
+
+--- students.db: auth_events ---
+CREATE TABLE auth_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT,
+            event_type TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            success INTEGER DEFAULT 0,
+            details TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+
+--- students.db: calendar_events ---
+CREATE TABLE calendar_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_email TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    event_date TEXT NOT NULL,
+                    event_time TEXT,
+                    description TEXT,
+                    created_at TEXT NOT NULL
+                )
+
+--- students.db: faculty_calendar_events ---
+CREATE TABLE faculty_calendar_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            faculty_email TEXT NOT NULL,
+            title TEXT NOT NULL,
+            event_date TEXT NOT NULL,
+            event_type TEXT NOT NULL DEFAULT 'class',
+            start_time TEXT DEFAULT '',
+            end_time TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+
+--- students.db: announcements ---
+CREATE TABLE announcements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            target TEXT NOT NULL DEFAULT 'all',
+            created_by TEXT NOT NULL DEFAULT 'admin',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active INTEGER DEFAULT 1
+        )
+
+--- faculty_data.db: faculty ---
+CREATE TABLE faculty (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                faculty_id TEXT UNIQUE,
+                name TEXT NOT NULL,
+                designation TEXT,
+                department TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                subject_incharge TEXT,
+                phone_number TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+
+--- faculty_data.db: sqlite_sequence ---
+CREATE TABLE sqlite_sequence(name,seq)
+
+--- faculty_data.db: email_requests ---
+CREATE TABLE email_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_email TEXT NOT NULL,
+                student_name TEXT NOT NULL,
+                student_roll_no TEXT NOT NULL,
+                student_department TEXT NOT NULL,
+                student_year TEXT NOT NULL,
+                faculty_id TEXT NOT NULL,
+                faculty_name TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                message TEXT NOT NULL,
+                attachment_name TEXT,
+                status TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (faculty_id) REFERENCES faculty(faculty_id)
+            )
+
+--- faculty_data.db: faculty_sent_emails ---
+CREATE TABLE faculty_sent_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_email TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )

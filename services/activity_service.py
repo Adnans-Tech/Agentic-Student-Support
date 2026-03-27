@@ -45,6 +45,24 @@ class ActivityService:
         return datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
 
     @staticmethod
+    def _serialize_row(row):
+        """Convert date/time objects to strings for JSON serialization."""
+        if not row:
+            return row
+            
+        data = dict(row)
+        for key, value in data.items():
+            if hasattr(value, 'isoformat'):
+                data[key] = value.isoformat()
+            elif hasattr(value, 'strftime'):
+                # For objects that only have strftime (like some time types)
+                if hasattr(value, 'hour'): # Likely a time or datetime
+                     data[key] = value.strftime('%H:%M:%S')
+                else:
+                     data[key] = str(value)
+        return data
+
+    @staticmethod
     def log_activity(student_email: str, action_type: str, description: str):
         """
         Log a student activity event.
@@ -92,11 +110,7 @@ class ActivityService:
 
                 activities = []
                 for row in cursor.fetchall():
-                    activities.append({
-                        'type': row['action_type'],
-                        'description': row['action_description'],
-                        'timestamp': row['created_at']
-                    })
+                    activities.append(ActivityService._serialize_row(row))
                 return activities
         except Exception as e:
             logger.error(f"ACTIVITY_FETCH_FAIL | {student_email} | {e}")
@@ -188,8 +202,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ? AND event_date = ?
                     ORDER BY event_time ASC
-                """), (student_email, event_date))
-                events = [dict(row) for row in cursor.fetchall()]
+                events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_EVENTS_FETCH_FAIL | {student_email} | {e}")
@@ -209,9 +222,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ? AND event_date >= ?
                     ORDER BY event_date ASC, event_time ASC
-                    LIMIT ?
-                """), (student_email, today, limit))
-                events = [dict(row) for row in cursor.fetchall()]
+                events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_UPCOMING_FAIL | {student_email} | {e}")
@@ -231,8 +242,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ?
                     ORDER BY event_date ASC, event_time ASC
-                """), (student_email,))
-                events = [dict(row) for row in cursor.fetchall()]
+                events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_ALL_EVENTS_FAIL | {student_email} | {e}")
