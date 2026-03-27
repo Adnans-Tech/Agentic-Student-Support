@@ -1,26 +1,24 @@
+import psycopg2
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
+conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+cur = conn.cursor()
 
-db_url = os.getenv('DATABASE_URL', '')
-use_pg = os.getenv('USE_POSTGRES', '')
-print('USE_POSTGRES:', use_pg)
-print('DATABASE_URL set:', bool(db_url))
-if db_url:
-    import re
-    masked = re.sub(r':[^:@]+@', ':****@', db_url)
-    print('DATABASE_URL (masked):', masked)
+email = 'mohdadnan2k4@gmail.com'
+print(f"--- USERS TABLE FOR {email} ---")
+cur.execute("SELECT * FROM users WHERE email=%s", (email,))
+user_row = cur.fetchone()
+print(user_row)
 
-try:
-    import psycopg2
-    print('psycopg2 version:', psycopg2.__version__)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
-    cur = conn.cursor()
-    cur.execute('SELECT version()')
-    print('Connected! Postgres version:', cur.fetchone()[0][:60])
-    cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-    tables = [r[0] for r in cur.fetchall()]
-    print('Tables:', tables)
-    conn.close()
-except Exception as e:
-    print('Connection ERROR:', type(e).__name__, str(e)[:300])
+if user_row:
+    print(f"--- STUDENTS TABLE FOR {email} ---")
+    cur.execute("SELECT * FROM students WHERE email=%s", (email,))
+    print(cur.fetchall())
+    
+    print(f"--- FACULTY TABLE FOR {email} ---")
+    cur.execute("SELECT * FROM faculty_profiles WHERE email=%s", (email,))
+    print(cur.fetchall())
+else:
+    print("User not found.")
