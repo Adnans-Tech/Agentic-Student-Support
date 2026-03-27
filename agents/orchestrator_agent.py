@@ -1710,7 +1710,8 @@ Return ONLY valid JSON (no markdown):
                     return {"success": True,
                             "message": f"✅ Email sent to {email.get('to_name', email.get('to',''))}!"}
                 return {"success": False,
-                        "message": f"❌ Failed: {result.get('error', 'Unknown')}"}
+                        "message": f"❌ Failed: {result.get('error', 'Unknown')}",
+                        "error": result.get('error', 'Unknown')}
 
             elif action_type == "ticket_preview":
                 allowed, remaining, mx = LimitsService.check_daily_limit(user_id, 'ticket')
@@ -1757,12 +1758,13 @@ Return ONLY valid JSON (no markdown):
                     return {"success": True, "ticket_id": tid,
                             "message": f"✅ Ticket **#{tid}** created!"}
                 return {"success": False,
-                        "message": f"❌ Failed: {result.get('error', 'Unknown')}"}
+                        "message": f"❌ Failed: {result.get('error', 'Unknown')}",
+                        "error": result.get('error', 'Unknown')}
             else:
-                return {"success": False, "message": f"Unknown action: {action_type}"}
+                return {"success": False, "message": f"Unknown action: {action_type}", "error": f"Unknown action: {action_type}"}
         except Exception as e:
             print(f"[ERROR] Action execution: {e}")
-            return {"success": False, "message": f"Error: {str(e)}"}
+            return {"success": False, "message": f"Error: {str(e)}", "error": str(e)}
 
 
 # =============================================================================

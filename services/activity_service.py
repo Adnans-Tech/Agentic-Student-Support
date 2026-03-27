@@ -106,17 +106,15 @@ class ActivityService:
     def get_last_activity_timestamp(student_email: str) -> str:
         """Get the timestamp of the student's most recent activity."""
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT created_at FROM student_activity
-                WHERE student_email = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (student_email,))
-            row = cursor.fetchone()
-            conn.close()
-            return row[0] if row else None
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT created_at FROM student_activity
+                    WHERE student_email = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """), (student_email,))
+                row = cursor.fetchone()
+                return row[0] if row else None
         except Exception as e:
             logger.error(f"LAST_ACTIVITY_FAIL | {student_email} | {e}")
             return None
@@ -155,14 +153,21 @@ class ActivityService:
         """
         ActivityService._ensure_calendar_table()
         try:
+            query = """
+                INSERT INTO calendar_events
+                (student_email, title, event_date, event_time, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """
+            if is_postgres():
+                query += " RETURNING id"
+
             with db_cursor('students') as cursor:
-                cursor.execute(adapt_query("""
-                    INSERT INTO calendar_events
-                    (student_email, title, event_date, event_time, description, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """), (student_email, title, event_date, event_time, description,
-                      ActivityService._now_ist()))
-                event_id = cursor.lastrowid if not is_postgres() else None # Placeholder
+                cursor.execute(adapt_query(query), (student_email, title, event_date, event_time, description,
+                                                  ActivityService._now_ist()))
+                if is_postgres():
+                    event_id = cursor.fetchone()[0]
+                else:
+                    event_id = cursor.lastrowid
             logger.info(f"CALENDAR_EVENT_ADDED | {student_email} | {title} | {event_date}")
             return event_id
         except Exception as e:
@@ -198,18 +203,15 @@ class ActivityService:
         ActivityService._ensure_calendar_table()
         today = datetime.now(IST).strftime('%Y-%m-%d')
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title, event_date, event_time, description
-                FROM calendar_events
-                WHERE student_email = ? AND event_date >= ?
-                ORDER BY event_date ASC, event_time ASC
-                LIMIT ?
-            """, (student_email, today, limit))
-            events = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT id, title, event_date, event_time, description
+                    FROM calendar_events
+                    WHERE student_email = ? AND event_date >= ?
+                    ORDER BY event_date ASC, event_time ASC
+                    LIMIT ?
+                """), (student_email, today, limit))
+                events = [dict(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_UPCOMING_FAIL | {student_email} | {e}")
@@ -223,17 +225,14 @@ class ActivityService:
         """
         ActivityService._ensure_calendar_table()
         try:
-            conn = sqlite3.connect(ActivityService.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, title, event_date, event_time, description
-                FROM calendar_events
-                WHERE student_email = ?
-                ORDER BY event_date ASC, event_time ASC
-            """, (student_email,))
-            events = [dict(row) for row in cursor.fetchall()]
-            conn.close()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT id, title, event_date, event_time, description
+                    FROM calendar_events
+                    WHERE student_email = ?
+                    ORDER BY event_date ASC, event_time ASC
+                """), (student_email,))
+                events = [dict(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
             logger.error(f"CALENDAR_ALL_EVENTS_FAIL | {student_email} | {e}")
