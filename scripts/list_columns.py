@@ -6,11 +6,13 @@ load_dotenv()
 conn = psycopg2.connect(os.getenv('DATABASE_URL'))
 cur = conn.cursor()
 
-def check_table(table_name):
-    cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'")
-    cols = [r[0] for r in cur.fetchall()]
-    print(f"Table {table_name}: {', '.join(cols)}")
+def full_check(table):
+    print(f"\n--- {table} ---")
+    cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '{table}'")
+    for row in cur.fetchall():
+        print(f"  {row[0]} ({row[1]})")
 
-check_table('users')
-check_table('students')
-check_table('faculty_profiles')
+full_check('users')
+full_check('students')
+full_check('faculty_profiles')
+conn.close()

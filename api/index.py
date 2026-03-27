@@ -639,98 +639,98 @@ def login_user():
             """), (email,))
             user = cursor.fetchone()
 
-        if not user:
-            log_auth_event(email, 'login_fail', success=False, details='User not found', req=request)
-            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+            if not user:
+                log_auth_event(email, 'login_fail', success=False, details='User not found', req=request)
+                return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
-        user_id, role, user_email, password_hash, email_verified, is_admin_flag, is_active_flag = user
+            user_id, role, user_email, password_hash, email_verified, is_admin_flag, is_active_flag = user
 
-        # Check account active
-        if not is_active_flag:
-            log_auth_event(email, 'login_fail', success=False, details='Account deactivated', req=request)
-            return jsonify({'success': False, 'error': 'Your account has been deactivated. Please contact admin.'}), 403
+            # Check account active
+            if not is_active_flag:
+                log_auth_event(email, 'login_fail', success=False, details='Account deactivated', req=request)
+                return jsonify({'success': False, 'error': 'Your account has been deactivated. Please contact admin.'}), 403
 
-        # Check email verification
-        if not email_verified:
-            log_auth_event(email, 'login_fail', success=False, details='Email not verified', req=request)
+            # Check email verification
+            if not email_verified:
+                log_auth_event(email, 'login_fail', success=False, details='Email not verified', req=request)
+                return jsonify({
+                    'success': False,
+                    'error': 'Please verify your email first. Check your inbox for the OTP.',
+                    'requires_verification': True,
+                    'email': email
+                }), 403
+
+            # Enforce that user has registered and set a password
+            if not password_hash:
+                log_auth_event(email, 'login_fail', success=False, details='Password not registered', req=request)
+                return jsonify({'success': False, 'error': 'Account not registered. Please register first to set your password.'}), 403
+
+            # Verify password
+            if not verify_password(password_hash, password):
+                log_auth_event(email, 'login_fail', success=False, details='Wrong password', req=request)
+                return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+
+            # Build user response
+            user_response = {'id': user_id, 'email': user_email, 'role': role}
+
+            if role == 'student':
+                cursor.execute(adapt_query("""
+                    SELECT roll_number, full_name, department, year, section, phone
+                    FROM students WHERE user_id = ?
+                """), (user_id,))
+                student = cursor.fetchone()
+                if student:
+                    user_response.update({
+                        'roll_number': student[0],
+                        'full_name': student[1],
+                        'department': student[2],
+                        'year': student[3],
+                        'section': student[4],
+                        'phone': student[5] or '',
+                    })
+
+                # Update last login in students table
+                cursor.execute(adapt_query("UPDATE students SET last_login = ? WHERE user_id = ?"),
+                              (datetime.utcnow(), user_id))
+
+            elif role == 'faculty':
+                cursor.execute(adapt_query("""
+                    SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge, timetable
+                    FROM faculty_profiles WHERE user_id = ?
+                """), (user_id,))
+                faculty = cursor.fetchone()
+                if faculty:
+                    user_response.update({
+                        'name': faculty[0],
+                        'full_name': faculty[0],
+                        'employee_id': faculty[1] or '',
+                        'department': faculty[2],
+                        'designation': faculty[3] or '',
+                        'subject_incharge': faculty[4] or '',
+                        'class_incharge': faculty[5] or '',
+                        'timetable': faculty[6] or '{}',
+                    })
+
+            # Generate JWT — include is_admin flag so frontend can show admin UI
+            token = generate_jwt_token(
+                user_id=user_id, email=user_email, role=role,
+                is_admin=bool(is_admin_flag)
+            )
+
+            # Add is_admin to user response so frontend stores it
+            user_response['is_admin'] = bool(is_admin_flag)
+
+            # Log success
+            log_auth_event(email, 'login_success', success=True, req=request)
+            if role == 'student':
+                log_student_activity(email, 'login', 'Logged in successfully')
+
             return jsonify({
-                'success': False,
-                'error': 'Please verify your email first. Check your inbox for the OTP.',
-                'requires_verification': True,
-                'email': email
-            }), 403
-
-        # Enforce that user has registered and set a password
-        if not password_hash:
-            log_auth_event(email, 'login_fail', success=False, details='Password not registered', req=request)
-            return jsonify({'success': False, 'error': 'Account not registered. Please register first to set your password.'}), 403
-
-        # Verify password
-        if not verify_password(password_hash, password):
-            log_auth_event(email, 'login_fail', success=False, details='Wrong password', req=request)
-            return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-
-        # Build user response
-        user_response = {'id': user_id, 'email': user_email, 'role': role}
-
-        if role == 'student':
-            cursor.execute(adapt_query("""
-                SELECT roll_number, full_name, department, year, section, phone
-                FROM students WHERE user_id = ?
-            """), (user_id,))
-            student = cursor.fetchone()
-            if student:
-                user_response.update({
-                    'roll_number': student[0],
-                    'full_name': student[1],
-                    'department': student[2],
-                    'year': student[3],
-                    'section': student[4],
-                    'phone': student[5] or '',
-                })
-
-            # Update last login in students table
-            cursor.execute(adapt_query("UPDATE students SET last_login = ? WHERE user_id = ?"),
-                          (datetime.utcnow(), user_id))
-
-        elif role == 'faculty':
-            cursor.execute(adapt_query("""
-                SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge, timetable
-                FROM faculty_profiles WHERE user_id = ?
-            """), (user_id,))
-            faculty = cursor.fetchone()
-            if faculty:
-                user_response.update({
-                    'name': faculty[0],
-                    'full_name': faculty[0],
-                    'employee_id': faculty[1] or '',
-                    'department': faculty[2],
-                    'designation': faculty[3] or '',
-                    'subject_incharge': faculty[4] or '',
-                    'class_incharge': faculty[5] or '',
-                    'timetable': faculty[6] or '{}',
-                })
-
-        # Generate JWT — include is_admin flag so frontend can show admin UI
-        token = generate_jwt_token(
-            user_id=user_id, email=user_email, role=role,
-            is_admin=bool(is_admin_flag)
-        )
-
-        # Add is_admin to user response so frontend stores it
-        user_response['is_admin'] = bool(is_admin_flag)
-
-        # Log success
-        log_auth_event(email, 'login_success', success=True, req=request)
-        if role == 'student':
-            log_student_activity(email, 'login', 'Logged in successfully')
-
-        return jsonify({
-            'success': True,
-            'message': 'Login successful',
-            'token': token,
-            'user': user_response
-        })
+                'success': True,
+                'message': 'Login successful',
+                'token': token,
+                'user': user_response
+            })
 
     except Exception as e:
         print(f"Login Error: {str(e)}")
