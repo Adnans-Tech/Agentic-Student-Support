@@ -94,7 +94,7 @@ class StatsService:
                     (student_email,)
                 )
                 row = cursor.fetchone()
-                stats['last_activity'] = row[0] if row else None
+                stats['last_activity'] = str(row[0]) if row and row[0] else None
         except Exception as e:
             logger.error(f"LAST_ACTIVITY_FAIL | {student_email} | {e}")
 

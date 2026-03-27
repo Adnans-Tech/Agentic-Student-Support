@@ -944,10 +944,15 @@ def get_student_stats():
         from services.stats_service import StatsService
         from services.limits_service import LimitsService
         
+        from core.db_config import serialize_row
         stats = StatsService.get_student_stats(email)
         limits = LimitsService.get_remaining_limits(email)
         stats['limits'] = limits
         trend = StatsService.get_weekly_chart_data(email)
+
+        # Ensure all nested values are serializable
+        stats = serialize_row(stats)
+        trend = [serialize_row(t) for t in trend]
 
         return jsonify({
             'success': True,
@@ -955,6 +960,7 @@ def get_student_stats():
             'trend': trend
         })
     except Exception as e:
+        print(f"[ERROR] Student stats: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -989,6 +995,14 @@ def get_student_profile():
         limits = LimitsService.get_remaining_limits(email)
         weekly_chart = StatsService.get_weekly_chart_data(email)
         recent_activity = ActivityService.get_recent_activity(email, limit=10)
+
+        from core.db_config import serialize_row
+        
+        # Serialize all components
+        profile = serialize_row(profile)
+        stats = serialize_row(stats)
+        weekly_chart = [serialize_row(day) for day in weekly_chart]
+        recent_activity = [serialize_row(act) for act in recent_activity]
 
         return jsonify({
             'success': True,
@@ -2148,13 +2162,21 @@ def get_faculty_list():
                     })
         
         # Normalize: frontend expects 'id' not 'faculty_id'
+        from core.db_config import serialize_row
+        final_list = []
         for f in faculty_list:
-            if 'faculty_id' in f and 'id' not in f:
-                f['id'] = f.pop('faculty_id')
+            # Handle both dict and row/tuple formats
+            data = serialize_row(f) if isinstance(f, dict) else {
+                'id': f[0], 'name': f[1], 'designation': f[3],
+                'department': f[4], 'contact': f[5] if len(f) > 5 else ''
+            }
+            if 'faculty_id' in data and 'id' not in data:
+                data['id'] = data.pop('faculty_id')
+            final_list.append(data)
         
         return jsonify({
             'success': True,
-            'faculty': faculty_list
+            'faculty': final_list
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2729,6 +2751,7 @@ def admin_dashboard():
                 LIMIT 10
             """))
             activity_rows = cursor.fetchall()
+            from core.db_config import serialize_row
             recent_activity = []
             for r in activity_rows:
                 # Parse action_description for extra details if possible
@@ -2738,11 +2761,14 @@ def admin_dashboard():
                     details['category'] = desc
                 if 'ticket' in desc.lower():
                     details['ticket_id'] = desc
+                
+                # Use serialize_row for the timestamp or just convert manually
+                ts = r[3].isoformat() if hasattr(r[3], 'isoformat') else str(r[3])
                 recent_activity.append({
                     'student_email': r[0],
                     'action_type': r[1],
                     'details': details,
-                    'timestamp': r[3]
+                    'timestamp': ts
                 })
 
         # Ticket counts
@@ -3192,17 +3218,17 @@ def get_active_announcements():
     """Get active announcements relevant to the calling user's role."""
     try:
         user_role = request.current_user.get('role', 'student')
-        from core.db_config import db_cursor
+        from core.db_config import db_cursor, get_bool_query, serialize_row
         with db_cursor('chat', dict_cursor=True) as cursor:
-            cursor.execute(adapt_query("""
+            cursor.execute(adapt_query(f"""
                 SELECT id, title, body, target, created_at
                 FROM announcements
-                WHERE is_active = 1
+                WHERE is_active = {get_bool_query(True)}
                   AND (target = 'all' OR target = ?)
                 ORDER BY created_at DESC
                 LIMIT 10
             """), (user_role,))
-            rows = [dict(r) for r in cursor.fetchall()]
+            rows = [serialize_row(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3215,6 +3241,7 @@ def get_active_announcements():
 def admin_report_tickets():
     """Department-wise ticket breakdown."""
     try:
+        from core.db_config import db_cursor, serialize_row
         with db_cursor('tickets', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT
@@ -3228,9 +3255,10 @@ def admin_report_tickets():
                 GROUP BY COALESCE(department, 'Unknown')
                 ORDER BY total DESC
             """))
-            rows = [dict(r) for r in cursor.fetchall()]
+            rows = [serialize_row(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
+        print(f"[ERROR] Ticket report: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3254,7 +3282,8 @@ def admin_report_email_usage():
         with db_cursor('faculty_data') as cursor:
             cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests"))
             result['student']['total'] = cursor.fetchone()[0]
-            cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE DATE(created_at) >= ?"), (week_ago,))
+            # Column name is 'timestamp' not 'created_at'
+            cursor.execute(adapt_query("SELECT COUNT(*) FROM email_requests WHERE timestamp >= ?"), (week_ago,))
             result['student']['last_7_days'] = cursor.fetchone()[0]
     except Exception as e:
         print(f"[ADMIN] Student email stats error: {e}")
@@ -3273,7 +3302,8 @@ def admin_report_email_usage():
             if exists:
                 cursor.execute(adapt_query("SELECT COUNT(*) FROM sent_emails"))
                 result['faculty']['total'] = cursor.fetchone()[0]
-                cursor.execute(adapt_query("SELECT COUNT(*) FROM sent_emails WHERE DATE(sent_at) >= ?"), (week_ago,))
+                # Column name is 'sent_at'
+                cursor.execute(adapt_query("SELECT COUNT(*) FROM sent_emails WHERE sent_at >= ?"), (week_ago,))
                 result['faculty']['last_7_days'] = cursor.fetchone()[0]
     except Exception as e:
         print(f"[ADMIN] Faculty email stats error: {e}")

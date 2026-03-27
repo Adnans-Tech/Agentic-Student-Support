@@ -222,3 +222,35 @@ def get_serial_type() -> str:
 def get_autoincrement_clause() -> str:
     """Return AUTOINCREMENT clause — not needed in Postgres (SERIAL handles it)"""
     return '' if is_postgres() else 'AUTOINCREMENT'
+
+
+def serialize_row(row):
+    """
+    Convert a database row (dict-like) into a JSON-serializable dict.
+    Handles datetime, date, and decimal objects.
+    """
+    if not row:
+        return row
+        
+    # Convert Row/RealDictRow to a plain dict
+    data = dict(row)
+    
+    for key, value in data.items():
+        # Handle datetime/date
+        if hasattr(value, 'isoformat'):
+            data[key] = value.isoformat()
+        # Handle decimal (often from Postgres numeric)
+        elif hasattr(value, 'to_eng_string'):
+            data[key] = float(value)
+        # Handle time objects
+        elif hasattr(value, 'hour') and not hasattr(value, 'year'):
+             data[key] = value.strftime('%H:%M:%S')
+             
+    return data
+
+
+def get_bool_query(is_true: bool = True) -> str:
+    """Return appropriate boolean literal/expression for current backend"""
+    if is_postgres():
+        return 'TRUE' if is_true else 'FALSE'
+    return '1' if is_true else '0'
