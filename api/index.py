@@ -642,7 +642,7 @@ def login_user():
         # Look up user by email
         with db_cursor('students') as cursor:
             cursor.execute(adapt_query("""
-                SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, 0), COALESCE(is_active, 1)
+                SELECT id, role, email, password_hash, email_verified, COALESCE(is_admin, FALSE), COALESCE(is_active, TRUE)
                 FROM users
                 WHERE email = ?
             """), (email,))
@@ -2917,8 +2917,8 @@ def admin_get_user(user_id):
             cursor = conn.cursor()
             cursor.execute(adapt_query("""
                 SELECT id, role, email, email_verified,
-                       COALESCE(is_active, 1) as is_active,
-                       COALESCE(is_admin, 0) as is_admin,
+                       COALESCE(is_active, TRUE) as is_active,
+                       COALESCE(is_admin, FALSE) as is_admin,
                        created_at
                 FROM users WHERE id = ?
             """), (user_id,))
