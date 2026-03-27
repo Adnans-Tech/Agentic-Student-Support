@@ -66,9 +66,9 @@ const studentService = {
         }
     },
 
-    async resetChat() {
+    async resetChat(sessionId) {
         try {
-            const response = await api.post('/reset');
+            const response = await api.post('/reset', { session_id: sessionId });
             return response.data;
         } catch (error) {
             throw error.response?.data || { error: 'Failed to reset chat' };

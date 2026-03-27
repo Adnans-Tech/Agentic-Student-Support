@@ -353,7 +353,18 @@ const ChatSupport = () => {
     };
 
     const handleSendMessage = async (messageText = inputMessage, force = false) => {
-        if (!messageText.trim() || (!force && confirmationPending)) return;
+        const trimmedMessage = messageText.trim();
+        const lowerMessage = trimmedMessage.toLowerCase();
+        
+        // Define keywords that should always be allowed to bypass confirmation pending
+        const isFlowControl = ['regenerate', 'cancel', 'reset', 'restart'].includes(lowerMessage);
+        
+        if (!trimmedMessage || (!force && confirmationPending && !isFlowControl)) return;
+        
+        // If it's a flow control command, clear any pending confirmation to allow fresh response
+        if (isFlowControl && confirmationPending) {
+            setConfirmationPending(null);
+        }
 
         // Stop listening if active when sending
         if (isListening && recognitionRef.current) {

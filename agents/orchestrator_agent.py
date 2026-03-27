@@ -338,6 +338,7 @@ ENTITY EXTRACTION RULES (CRITICAL):
 - email_address: Any email address (user@domain.com)
 - purpose: MUST extract the reason/topic/subject if mentioned. Look for phrases after "about", "regarding", "for", "asking", "to discuss", "to request", "to inquire". NEVER return null for purpose if the user mentions a reason.
   Examples:
+  - "email my friend asking to return my notes" → purpose: "return my notes"
   - "email Dr. Kumar about internship" → purpose: "internship"
   - "send email to test@email.com regarding exam schedule" → purpose: "exam schedule"
   - "contact faculty for notes" → purpose: "notes"
@@ -1142,7 +1143,13 @@ Return ONLY valid JSON:
 
             if email_match:
                 slots["recipient_email"] = email_match.group()
-                slots["recipient_name"] = email_match.group().split("@")[0]
+                # Only overwrite name if we don't already have a valid one from entities
+                if not slots.get("recipient_name") or "@" in str(slots.get("recipient_name")):
+                    # Try to get a clean name from the email prefix, but prioritize any faculty_name entity
+                    if entities.get("faculty_name"):
+                        slots["recipient_name"] = entities.get("faculty_name")
+                    else:
+                        slots["recipient_name"] = email_match.group().split("@")[0].capitalize()
                 self._save_flow(session_id, "email", "collect_purpose", slots, entities)
                 return self._make_response(
                     f"📧 Got it! I'll email **{slots['recipient_email']}**.\n\nWhat would you like to say?",
@@ -1301,7 +1308,15 @@ Return ONLY valid JSON:
     def _generate_email_preview(self, message, user_id, session_id,
                                 student_profile, slots, entities):
         purpose = slots.get("purpose", message)
-        recipient_name = slots.get("recipient_name", slots.get("recipient_email", ""))
+        # Identify the best candidate for recipient name
+        recipient_name = slots.get("recipient_name")
+        if not recipient_name or "@" in str(recipient_name):
+             recipient_name = slots.get("faculty_name")
+        
+        if not recipient_name or "@" in str(recipient_name):
+             recipient_name = slots.get("recipient_email", "")
+             if "@" in recipient_name:
+                 recipient_name = recipient_name.split("@")[0].capitalize()
         recipient_email = slots.get("recipient_email", "")
         student_name = student_profile.get("name", "") if student_profile else ""
         is_regen = slots.pop("_regenerate", False)

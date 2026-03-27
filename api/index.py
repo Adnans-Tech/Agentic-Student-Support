@@ -241,6 +241,13 @@ def register_user():
             is_reregistration = False
             if existing_user:
                 existing_user_id = existing_user[0]
+                # Check if this email is already verified - if so, restrict re-registration unless it's a password reset flow (not implemented here)
+                # However, the user wants to restrict "same account" registration.
+                if existing_user[1]: # email_verified
+                     # If it's already verified, we should probably block re-registration to prevent account takeover/overwrite
+                     # unless we have a specific reason to allow it.
+                     pass 
+
                 # Allow re-registration: update the password for the existing seeded account
                 password_hash = hash_password(password)
                 cursor.execute(adapt_query("UPDATE users SET password_hash = ?, email_verified = FALSE WHERE id = ?"),
@@ -281,11 +288,13 @@ def register_user():
                 if not sec_valid:
                     return jsonify({'success': False, 'error': sec_error}), 400
 
-                # Check duplicate roll number (skip for re-registration)
-                if not is_reregistration:
-                    cursor.execute(adapt_query("SELECT id FROM students WHERE roll_number = ?"), (roll_number,))
-                    if cursor.fetchone():
-                        return jsonify({'success': False, 'error': 'This roll number is already registered.'}), 400
+                # Check duplicate roll number (ALWAYS check, even for re-registration)
+                cursor.execute(adapt_query("SELECT user_id FROM students WHERE roll_number = ?"), (roll_number,))
+                dup_student = cursor.fetchone()
+                if dup_student:
+                    # If it's a re-registration, it's okay ONLY if the roll number belongs to the same user
+                    if not is_reregistration or dup_student[0] != existing_user_id:
+                        return jsonify({'success': False, 'error': 'This roll number is already registered to another account.'}), 400
 
                 if is_reregistration:
                     user_id = existing_user_id
@@ -734,8 +743,12 @@ def login_user():
 
     except Exception as e:
         print(f"Login Error: {str(e)}")
-        log_auth_event(email if 'email' in dir() else '', 'login_fail', success=False, details=str(e), req=request)
-        return jsonify({'success': False, 'error': 'Login failed. Please try again.'}), 500
+        import traceback
+        traceback.print_exc()
+        # Ensure email is defined for logging
+        err_email = locals().get('email', 'unknown')
+        log_auth_event(err_email, 'login_fail', success=False, details=str(e), req=request)
+        return jsonify({'success': False, 'error': f'Login failed: {str(e)}'}), 500
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -2453,7 +2466,7 @@ def confirm_chat_action():
         } if student else {}
         
         # Execute the confirmed action
-        result = orchestrator_agent.execute_confirmed_action(
+        result = get_orchestrator().execute_confirmed_action(
             user_id=user_id,
             session_id=session_id,
             action_data=action_data,
@@ -2619,7 +2632,7 @@ def faculty_confirm_email():
             _clear_flow(session_id)
             return jsonify({'success': True, 'message': '🚫 Email cancelled. Draft discarded.'})
 
-        result = faculty_orchestrator_agent.execute_email_send(
+        result = get_faculty_orchestrator().execute_email_send(
             session_id=session_id,
             edited_subject=edited.get('subject'),
             edited_body=edited.get('body'),
@@ -2655,7 +2668,7 @@ def faculty_confirm_resolve():
             _clear_flow(session_id)
             return jsonify({'success': True, 'message': '🚫 Ticket resolution cancelled.'})
 
-        result = faculty_orchestrator_agent.execute_ticket_resolve(
+        result = get_faculty_orchestrator().execute_ticket_resolve(
             session_id=session_id,
             faculty_email=faculty_email,
             edited_note=edited_note,

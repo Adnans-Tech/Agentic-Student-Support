@@ -224,16 +224,18 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
 
 ⚠️ CRITICAL RULES - VIOLATION WILL CAUSE FAILURE:
 
-1. PURPOSE PRESERVATION:
-   - Write ONLY about the stated purpose
-   - DO NOT change topics, add related subjects, or expand beyond what's asked
+1. PURPOSE PRESERVATION (ABSOLUTE PRIORITY):
+   - Write ONLY about the stated purpose: "{purpose}"
+   - DO NOT hallucinate related events (e.g., if user says "return my book", do NOT say "I received it").
+   - Match the user's intent EXACTLY. If they ask for something, the email MUST ask for it.
+   - DO NOT change topics, add related subjects, or expand beyond what's asked.
 
 {voice_rules}
 
 3. NO CREATIVE EXPANSION:
-   - DO NOT add bullet points unless purpose explicitly requests them
-   - DO NOT add explanations, examples, or background unless purpose requests them
-   - DO NOT include benefits, advantages, or additional context not in purpose
+   - DO NOT add bullet points unless purpose explicitly requests them.
+   - DO NOT add explanations, examples, or background unless purpose requests them.
+   - DO NOT include benefits, advantages, or additional context not in purpose.
 
 4. LENGTH ENFORCEMENT:
    - {length_guidance.get(length, length_guidance['medium'])}
