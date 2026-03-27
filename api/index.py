@@ -2169,7 +2169,7 @@ def check_email_quota():
         if not student_email:
             return jsonify({'success': False, 'error': 'Email parameter required'}), 400
         
-        quota = email_request_service.check_student_quota(student_email)
+        quota = get_email_request_service().check_student_quota(student_email)
         
         return jsonify({
             'success': True,
@@ -2220,7 +2220,7 @@ def send_faculty_email():
             }), 400
         
         # Send email
-        success, msg = email_request_service.send_faculty_email(
+        success, msg = get_email_request_service().send_faculty_email(
             student_data=student_data,
             faculty_id=faculty_id,
             subject=subject,
@@ -2237,7 +2237,7 @@ def send_faculty_email():
             )
         
         # Get updated quota
-        quota = email_request_service.check_student_quota(student_data['email'])
+        quota = get_email_request_service().check_student_quota(student_data['email'])
         
         return jsonify({
             'success': success,
@@ -2262,7 +2262,7 @@ def get_email_history():
         if not student_email:
             return jsonify({'success': False, 'error': 'Email parameter required'}), 400
         
-        history = email_request_service.get_student_history(student_email)
+        history = get_email_request_service().get_student_history(student_email)
         
         return jsonify({
             'success': True,
@@ -3177,7 +3177,7 @@ def get_active_announcements():
     try:
         user_role = request.current_user.get('role', 'student')
         from core.db_config import db_cursor
-        with db_cursor('students', dict_cursor=True) as cursor:
+        with db_cursor('chat', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT id, title, body, target, created_at
                 FROM announcements

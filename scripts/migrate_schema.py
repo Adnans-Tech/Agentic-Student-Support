@@ -122,12 +122,40 @@ def migrate():
             id SERIAL PRIMARY KEY,
             student_email VARCHAR(255) NOT NULL,
             student_name VARCHAR(100),
-            faculty_email VARCHAR(255) NOT NULL,
+            student_roll_no VARCHAR(50),
+            student_department VARCHAR(100),
+            student_year VARCHAR(10),
+            faculty_id VARCHAR(50) NOT NULL,
             faculty_name VARCHAR(100),
             subject TEXT,
-            purpose TEXT,
+            message TEXT,
+            attachment_name VARCHAR(255),
             status VARCHAR(20),
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS faculty_directory (
+            faculty_id VARCHAR(50) PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            designation VARCHAR(100) NOT NULL,
+            department VARCHAR(100) NOT NULL,
+            subject_incharge VARCHAR(255),
+            email VARCHAR(255) UNIQUE NOT NULL,
+            phone_number VARCHAR(20),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS announcements (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            body TEXT NOT NULL,
+            target VARCHAR(50) DEFAULT 'all',
+            created_by VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active SMALLINT DEFAULT 1
         )
         """
     ]
@@ -150,7 +178,13 @@ def migrate():
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) DEFAULT ''",
             "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
             "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20)",
-            "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS profile_photo VARCHAR(255)"
+            "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS profile_photo VARCHAR(255)",
+            "ALTER TABLE email_requests RENAME COLUMN purpose TO message",
+            "ALTER TABLE email_requests RENAME COLUMN faculty_email TO faculty_id",
+            "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS student_roll_no VARCHAR(50)",
+            "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS student_department VARCHAR(100)",
+            "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS student_year VARCHAR(10)",
+            "ALTER TABLE email_requests ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255)"
         ]
         for alter in alter_commands:
             print(f"Executing: {alter}...")

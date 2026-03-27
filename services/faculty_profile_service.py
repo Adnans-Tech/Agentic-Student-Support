@@ -5,7 +5,7 @@ and calendar events (timetable, free hours, leave).
 Mirrors the student profile_service.py pattern.
 """
 
-import sqlite3
+from core.db_config import db_cursor, db_connection, adapt_query, is_postgres
 import os
 import uuid
 import logging
@@ -38,21 +38,18 @@ class FacultyProfileService:
         Returns dict with all profile fields, or None if not found.
         """
         try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
-                       fp.designation, fp.subject_incharge, fp.class_incharge,
-                       fp.phone, fp.profile_photo, fp.office_room, fp.bio,
-                       fp.linkedin, fp.github, fp.researchgate, fp.timetable,
-                       fp.created_at, u.email
-                FROM faculty_profiles fp
-                JOIN users u ON fp.user_id = u.id
-                WHERE u.email = ?
-            """, (faculty_email,))
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
+                           fp.designation, fp.subject_incharge, fp.class_incharge,
+                           fp.phone, fp.profile_photo, fp.office_room, fp.bio,
+                           fp.linkedin, fp.github, fp.researchgate, fp.timetable,
+                           fp.created_at, u.email
+                    FROM faculty_profiles fp
+                    JOIN users u ON fp.user_id = u.id
+                    WHERE u.email = ?
+                """), (faculty_email,))
+                row = cursor.fetchone()
 
             if not row:
                 return None
@@ -153,31 +150,24 @@ class FacultyProfileService:
                 updates[link_field] = url
 
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT fp.id FROM faculty_profiles fp
+                    JOIN users u ON fp.user_id = u.id
+                    WHERE u.email = ?
+                """), (faculty_email,))
+                row = cursor.fetchone()
+                if not row:
+                    return {'error': 'Faculty profile not found'}
 
-            # Get user_id from email
-            cursor.execute("""
-                SELECT fp.id FROM faculty_profiles fp
-                JOIN users u ON fp.user_id = u.id
-                WHERE u.email = ?
-            """, (faculty_email,))
-            row = cursor.fetchone()
-            if not row:
-                conn.close()
-                return {'error': 'Faculty profile not found'}
+                faculty_id = row[0]
 
-            faculty_id = row[0]
+                set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
+                values = list(updates.values()) + [faculty_id]
 
-            set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-            values = list(updates.values()) + [faculty_id]
-
-            cursor.execute(f"""
-                UPDATE faculty_profiles SET {set_clause} WHERE id = ?
-            """, values)
-
-            conn.commit()
-            conn.close()
+                cursor.execute(adapt_query(f"""
+                    UPDATE faculty_profiles SET {set_clause} WHERE id = ?
+                """), tuple(values))
 
             changed = list(updates.keys())
             logger.info(f"FACULTY_PROFILE_UPDATE | {faculty_email} | fields={changed}")
@@ -216,14 +206,11 @@ class FacultyProfileService:
             os.replace(temp_path, full_path)
 
             # Update DB
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE faculty_profiles SET profile_photo = ?
-                WHERE user_id = (SELECT id FROM users WHERE email = ?)
-            """, (relative_path, faculty_email))
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    UPDATE faculty_profiles SET profile_photo = ?
+                    WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """), (relative_path, faculty_email))
 
             photo_url = f"/static/{relative_path}?v={int(time.time())}"
             logger.info(f"FACULTY_PHOTO_UPLOAD | {faculty_email} | {filename}")
@@ -242,14 +229,11 @@ class FacultyProfileService:
         try:
             FacultyProfileService._delete_old_photo(faculty_email)
 
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE faculty_profiles SET profile_photo = NULL
-                WHERE user_id = (SELECT id FROM users WHERE email = ?)
-            """, (faculty_email,))
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    UPDATE faculty_profiles SET profile_photo = NULL
+                    WHERE user_id = (SELECT id FROM users WHERE email = ?)
+                """), (faculty_email,))
 
             logger.info(f"FACULTY_PHOTO_DELETE | {faculty_email}")
             return {'success': True}
@@ -262,15 +246,13 @@ class FacultyProfileService:
     def _delete_old_photo(faculty_email: str):
         """Delete the existing photo file from disk if it exists."""
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT fp.profile_photo FROM faculty_profiles fp
-                JOIN users u ON fp.user_id = u.id
-                WHERE u.email = ?
-            """, (faculty_email,))
-            row = cursor.fetchone()
-            conn.close()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    SELECT fp.profile_photo FROM faculty_profiles fp
+                    JOIN users u ON fp.user_id = u.id
+                    WHERE u.email = ?
+                """), (faculty_email,))
+                row = cursor.fetchone()
 
             if row and row[0]:
                 old_path = os.path.join('static', row[0])
@@ -302,42 +284,38 @@ class FacultyCalendarService:
     def get_events(faculty_email: str, month: int = None, year: int = None) -> list:
         """Get calendar events, optionally filtered by month/year."""
         try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with db_cursor('students', dict_cursor=True) as cursor:
+                if month and year:
+                    # Filter by month: YYYY-MM prefix
+                    date_prefix = f"{year:04d}-{month:02d}"
+                    cursor.execute(adapt_query("""
+                        SELECT id, title, event_date, event_type, start_time,
+                               end_time, description, created_at
+                        FROM faculty_calendar_events
+                        WHERE faculty_email = ? AND event_date LIKE ?
+                        ORDER BY event_date, start_time
+                    """), (faculty_email, f"{date_prefix}%"))
+                else:
+                    cursor.execute(adapt_query("""
+                        SELECT id, title, event_date, event_type, start_time,
+                               end_time, description, created_at
+                        FROM faculty_calendar_events
+                        WHERE faculty_email = ?
+                        ORDER BY event_date, start_time
+                    """), (faculty_email,))
 
-            if month and year:
-                # Filter by month: YYYY-MM prefix
-                date_prefix = f"{year:04d}-{month:02d}"
-                cursor.execute("""
-                    SELECT id, title, event_date, event_type, start_time,
-                           end_time, description, created_at
-                    FROM faculty_calendar_events
-                    WHERE faculty_email = ? AND event_date LIKE ?
-                    ORDER BY event_date, start_time
-                """, (faculty_email, f"{date_prefix}%"))
-            else:
-                cursor.execute("""
-                    SELECT id, title, event_date, event_type, start_time,
-                           end_time, description, created_at
-                    FROM faculty_calendar_events
-                    WHERE faculty_email = ?
-                    ORDER BY event_date, start_time
-                """, (faculty_email,))
-
-            events = []
-            for row in cursor.fetchall():
-                events.append({
-                    'id': row['id'],
-                    'title': row['title'],
-                    'event_date': row['event_date'],
-                    'event_type': row['event_type'],
-                    'start_time': row['start_time'] or '',
-                    'end_time': row['end_time'] or '',
-                    'description': row['description'] or '',
-                    'created_at': row['created_at'],
-                })
-            conn.close()
+                events = []
+                for row in cursor.fetchall():
+                    events.append({
+                        'id': row['id'],
+                        'title': row['title'],
+                        'event_date': row['event_date'],
+                        'event_type': row['event_type'],
+                        'start_time': row['start_time'] or '',
+                        'end_time': row['end_time'] or '',
+                        'description': row['description'] or '',
+                        'created_at': row['created_at'],
+                    })
             return events
 
         except Exception as e:
@@ -364,16 +342,21 @@ class FacultyCalendarService:
             return {'error': f'Invalid event type. Allowed: {", ".join(FacultyCalendarService.VALID_EVENT_TYPES)}'}
 
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO faculty_calendar_events
-                    (faculty_email, title, event_date, event_type, start_time, end_time, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (faculty_email, title, event_date, event_type, start_time, end_time, description))
-            event_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
+            with db_cursor('students') as cursor:
+                if is_postgres():
+                    cursor.execute("""
+                        INSERT INTO faculty_calendar_events
+                            (faculty_email, title, event_date, event_type, start_time, end_time, description)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    """, (faculty_email, title, event_date, event_type, start_time, end_time, description))
+                    event_id = cursor.fetchone()[0]
+                else:
+                    cursor.execute("""
+                        INSERT INTO faculty_calendar_events
+                            (faculty_email, title, event_date, event_type, start_time, end_time, description)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (faculty_email, title, event_date, event_type, start_time, end_time, description))
+                    event_id = cursor.lastrowid
 
             logger.info(f"FACULTY_CALENDAR_ADD | {faculty_email} | {event_id} | {event_type}")
             return {'success': True, 'event_id': event_id}
@@ -386,39 +369,32 @@ class FacultyCalendarService:
     def update_event(faculty_email: str, event_id: int, data: dict) -> dict:
         """Update an existing calendar event (ownership validated)."""
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
+            with db_cursor('students') as cursor:
+                # Verify ownership
+                cursor.execute(adapt_query("""
+                    SELECT id FROM faculty_calendar_events
+                    WHERE id = ? AND faculty_email = ?
+                """), (event_id, faculty_email))
+                if not cursor.fetchone():
+                    return {'error': 'Event not found or access denied'}
 
-            # Verify ownership
-            cursor.execute("""
-                SELECT id FROM faculty_calendar_events
-                WHERE id = ? AND faculty_email = ?
-            """, (event_id, faculty_email))
-            if not cursor.fetchone():
-                conn.close()
-                return {'error': 'Event not found or access denied'}
+                allowed_fields = {'title', 'event_date', 'event_type', 'start_time', 'end_time', 'description'}
+                updates = {k: v.strip() if isinstance(v, str) else v
+                           for k, v in data.items() if k in allowed_fields}
 
-            allowed_fields = {'title', 'event_date', 'event_type', 'start_time', 'end_time', 'description'}
-            updates = {k: v.strip() if isinstance(v, str) else v
-                       for k, v in data.items() if k in allowed_fields}
+                if not updates:
+                    return {'error': 'No valid fields to update'}
 
-            if not updates:
-                conn.close()
-                return {'error': 'No valid fields to update'}
+                if 'event_type' in updates and updates['event_type'] not in FacultyCalendarService.VALID_EVENT_TYPES:
+                    return {'error': 'Invalid event type'}
 
-            if 'event_type' in updates and updates['event_type'] not in FacultyCalendarService.VALID_EVENT_TYPES:
-                conn.close()
-                return {'error': 'Invalid event type'}
+                set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
+                values = list(updates.values()) + [event_id, faculty_email]
 
-            set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-            values = list(updates.values()) + [event_id, faculty_email]
-
-            cursor.execute(f"""
-                UPDATE faculty_calendar_events SET {set_clause}
-                WHERE id = ? AND faculty_email = ?
-            """, values)
-            conn.commit()
-            conn.close()
+                cursor.execute(adapt_query(f"""
+                    UPDATE faculty_calendar_events SET {set_clause}
+                    WHERE id = ? AND faculty_email = ?
+                """), tuple(values))
 
             logger.info(f"FACULTY_CALENDAR_UPDATE | {faculty_email} | {event_id}")
             return {'success': True}
@@ -431,20 +407,14 @@ class FacultyCalendarService:
     def delete_event(faculty_email: str, event_id: int) -> dict:
         """Delete a calendar event (ownership validated)."""
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
+            with db_cursor('students') as cursor:
+                cursor.execute(adapt_query("""
+                    DELETE FROM faculty_calendar_events
+                    WHERE id = ? AND faculty_email = ?
+                """), (event_id, faculty_email))
 
-            cursor.execute("""
-                DELETE FROM faculty_calendar_events
-                WHERE id = ? AND faculty_email = ?
-            """, (event_id, faculty_email))
-
-            if cursor.rowcount == 0:
-                conn.close()
-                return {'error': 'Event not found or access denied'}
-
-            conn.commit()
-            conn.close()
+                if cursor.rowcount == 0:
+                    return {'error': 'Event not found or access denied'}
 
             logger.info(f"FACULTY_CALENDAR_DELETE | {faculty_email} | {event_id}")
             return {'success': True}
