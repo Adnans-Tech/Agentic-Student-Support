@@ -145,7 +145,9 @@ def migrate():
         alter_commands = [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
+            "ALTER TABLE students ADD COLUMN IF NOT EXISTS last_login TIMESTAMP",
+            "ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"
         ]
         for alter in alter_commands:
             print(f"Executing: {alter}...")
