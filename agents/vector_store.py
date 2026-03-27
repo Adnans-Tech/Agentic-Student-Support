@@ -28,9 +28,9 @@ def _get_embeddings():
     if not api_key:
         raise ValueError("[ERROR] HUGGINGFACE_API_KEY not set in environment variables.")
 
-    # Use the new router.huggingface.co URL format as required by HF
+    # Use the Repo ID directly to let LangChain handle URL and headers
     return HuggingFaceEndpointEmbeddings(
-        model=f"https://router.huggingface.co/hf-inference/models/{model}",
+        model=model,
         huggingfacehub_api_token=api_key,
         task="feature-extraction"
     )
