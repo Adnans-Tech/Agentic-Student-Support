@@ -79,7 +79,7 @@ class StatsService:
                 # Emails sent today (Asia/Kolkata date)
                 today = StatsService._today_kolkata()
                 cursor.execute(
-                    adapt_query("SELECT COUNT(*) FROM email_requests WHERE student_email = ? AND DATE(created_at) = ?"),
+                    adapt_query("SELECT COUNT(*) FROM email_requests WHERE student_email = ? AND DATE(timestamp) = ?"),
                     (student_email, today)
                 )
                 stats['emails_today'] = cursor.fetchone()[0]

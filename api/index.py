@@ -2382,7 +2382,7 @@ def chat_orchestrator():
         } if student else {"name": user_id, "email": user_id}
         
         # Process message through orchestrator
-        result = orchestrator_agent.process_message(
+        result = get_orchestrator().process_message(
             user_message=user_message,
             user_id=user_id,
             session_id=session_id,
@@ -2584,7 +2584,7 @@ def faculty_chat_orchestrator():
 
         faculty_profile['email'] = faculty_email
 
-        result = faculty_orchestrator_agent.process_message(
+        result = get_faculty_orchestrator().process_message(
             message=user_message,
             user_id=faculty_email,
             session_id=session_id,
@@ -3163,9 +3163,8 @@ def get_active_announcements():
     """Get active announcements relevant to the calling user's role."""
     try:
         user_role = request.current_user.get('role', 'student')
-        with db_connection(AUTH_DB_PATH) as conn:
-            # row_factory handled by db_cursor
-            cursor = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT id, title, body, target, created_at
                 FROM announcements

@@ -140,6 +140,19 @@ def migrate():
         for cmd in commands:
             print(f"Executing: {cmd.strip().splitlines()[0]}...")
             cur.execute(cmd)
+
+        # Apply schema upgrades to existing databases
+        alter_commands = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"
+        ]
+        for alter in alter_commands:
+            print(f"Executing: {alter}...")
+            try:
+                cur.execute(alter)
+            except Exception as e:
+                print(f"Notice during ALTER: {e}")
             
         print("✅ Migration successful!")
         cur.close()
