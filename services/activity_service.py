@@ -202,6 +202,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ? AND event_date = ?
                     ORDER BY event_time ASC
+                """), (student_email, event_date))
                 events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
@@ -222,6 +223,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ? AND event_date >= ?
                     ORDER BY event_date ASC, event_time ASC
+                """), (student_email, today))
                 events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
@@ -242,6 +244,7 @@ class ActivityService:
                     FROM calendar_events
                     WHERE student_email = ?
                     ORDER BY event_date ASC, event_time ASC
+                """), (student_email,))
                 events = [ActivityService._serialize_row(row) for row in cursor.fetchall()]
             return events
         except Exception as e:
