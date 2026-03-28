@@ -73,6 +73,7 @@ class TicketDatabase:
                     category TEXT NOT NULL,
                     sub_category TEXT NOT NULL,
                     priority TEXT NOT NULL,
+                    subject TEXT,
                     description TEXT NOT NULL,
                     status TEXT DEFAULT 'Open',
                     department TEXT,
@@ -86,6 +87,7 @@ class TicketDatabase:
             
             # Safely add columns for faculty ticket resolution
             columns_to_add = [
+                ("subject", "TEXT"),
                 ("resolved_by", "TEXT"),
                 ("resolved_at", "TIMESTAMP"),
                 ("resolution_note", "TEXT")
@@ -267,6 +269,10 @@ class TicketDatabase:
             sla_hours = ticket_data.get('sla_hours', 48)
             expected_resolution = datetime.now() + timedelta(hours=sla_hours)
             
+            # Create a short subject from description since the agent doesn't generate one
+            raw_desc = ticket_data.get('description', 'User Request')
+            subject = raw_desc[:50] + '...' if len(raw_desc) > 50 else raw_desc
+            
             conn = self._get_connection()
             cursor = conn.cursor()
             ph = get_placeholder()
@@ -274,15 +280,16 @@ class TicketDatabase:
             cursor.execute(f'''
                 INSERT INTO tickets (
                     ticket_id, student_email, category, sub_category,
-                    priority, description, department, expected_resolution,
+                    priority, subject, description, department, expected_resolution,
                     attachment_info
-                ) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+                ) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
             ''', (
                 ticket_id,
                 ticket_data['student_email'],
                 ticket_data['category'],
                 ticket_data['sub_category'],
                 ticket_data['priority'],
+                subject,
                 ticket_data['description'],
                 ticket_data['department'],
                 expected_resolution,
