@@ -57,7 +57,7 @@ class AgentDataAccess:
             query = """
                 SELECT course_code, course_name, department, seats, degree
                 FROM courses
-                WHERE is_active = TRUE
+                WHERE is_active = 1
                 ORDER BY course_name
             """
             cursor.execute(query)
@@ -132,7 +132,7 @@ class AgentDataAccess:
             query = f"""
                 SELECT course_code, course_name, department, seats, degree
                 FROM courses
-                WHERE is_active = TRUE 
+                WHERE is_active = 1 
                 AND (LOWER(course_name) LIKE LOWER({self.ph}) 
                      OR LOWER(course_code) LIKE LOWER({self.ph}))
                 ORDER BY course_name

@@ -88,6 +88,32 @@ else:
     else:
         print("\n[INFO] Using Cloud Database (Postgres). Skipping local SQLite initialization.")
 
+# Auto-migration: Ensure all required columns exist in PostgreSQL tickets table
+# This handles existing Vercel deployments where the table was created without these columns
+if is_postgres():
+    try:
+        _mig_conn = get_db_connection('tickets')
+        _mig_cur = _mig_conn.cursor()
+        _ticket_alters = [
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS expected_resolution TIMESTAMP",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS attachment_info TEXT",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sub_category VARCHAR(100)",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(255)",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP",
+            "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolution_note TEXT",
+        ]
+        for _alt in _ticket_alters:
+            try:
+                _mig_cur.execute(_alt)
+            except Exception:
+                pass  # Column may already exist
+        _mig_conn.commit()
+        _mig_conn.close()
+        print("[OK] Ticket schema migration completed.")
+    except Exception as _mig_e:
+        print(f"[WARN] Ticket schema migration failed (non-critical): {_mig_e}")
+
+
 # -----------------------------------------------------------------------------
 # LAZY AGENT INITIALIZATION (Serverless Optimized)
 # -----------------------------------------------------------------------------
@@ -1629,8 +1655,7 @@ def resolve_faculty_ticket(ticket_id):
                     resolution_note = ?
                 WHERE ticket_id = ?
             """), (now, faculty_id, now, resolution_note, ticket_id))
-            
-            t_conn.commit()
+            # db_cursor context manager auto-commits
         
         return jsonify({'success': True, 'message': 'Ticket resolved successfully'})
     except Exception as e:

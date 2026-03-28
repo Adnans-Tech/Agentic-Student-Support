@@ -226,16 +226,23 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
 
 1. PURPOSE PRESERVATION (ABSOLUTE PRIORITY):
    - Write ONLY about the stated purpose: "{purpose}"
-   - DO NOT hallucinate related events (e.g., if user says "return my book", do NOT say "I received it").
-   - Match the user's intent EXACTLY. If they ask for something, the email MUST ask for it.
-   - DO NOT change topics, add related subjects, or expand beyond what's asked.
+   - EXTRACT and USE every specific detail mentioned in the purpose:
+     * Dates/times (e.g., "tomorrow", "3 PM", "March 29") → MUST appear verbatim in email
+     * Documents/items (e.g., "resume", "ID card", "report") → MUST be mentioned explicitly
+     * Locations (e.g., "Room 325", "conference hall") → MUST be included
+     * Names (e.g., "Dr. Smith", "HR team") → MUST be used
+   - If purpose says "tomorrow's interview" → email MUST say "interview scheduled for tomorrow"
+   - If purpose says "carry a copy of resume" → email MUST explicitly remind about bringing a resume
+   - DO NOT ask vague questions if the purpose already provides all details.
+   - If the purpose is a STATEMENT (e.g., "attend interview tomorrow"), the email must CONFIRM or ACT on it, NOT ask about it.
 
 {voice_rules}
 
-3. NO CREATIVE EXPANSION:
-   - DO NOT add bullet points unless purpose explicitly requests them.
-   - DO NOT add explanations, examples, or background unless purpose requests them.
-   - DO NOT include benefits, advantages, or additional context not in purpose.
+3. NO GENERIC FILLER:
+   - DO NOT write: "I would like to know if I can attend", "Please let me know the details"
+   - DO NOT write: "I look forward to hearing from you about this matter"
+   - Instead, write DIRECTLY about what the purpose states, using the specific details.
+   - If purpose says to remind about something, the email MUST clearly state that reminder.
 
 4. LENGTH ENFORCEMENT:
    - {length_guidance.get(length, length_guidance['medium'])}
