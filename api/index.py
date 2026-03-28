@@ -3116,14 +3116,13 @@ def admin_force_close_ticket(ticket_id):
 def admin_list_announcements():
     """List all announcements, newest first."""
     try:
-        with db_connection(AUTH_DB_PATH) as conn:
-            # row_factory handled by db_cursor
-            cursor = conn.cursor()
+        from core.db_config import db_cursor, serialize_row
+        with db_cursor('students', dict_cursor=True) as cursor:
             cursor.execute(adapt_query("""
                 SELECT id, title, body, target, created_by, created_at, updated_at, is_active
                 FROM announcements ORDER BY created_at DESC
             """))
-            rows = [dict(r) for r in cursor.fetchall()]
+            rows = [serialize_row(r) for r in cursor.fetchall()]
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3144,15 +3143,17 @@ def admin_create_announcement():
             return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
 
         admin_email = request.current_user.get('email', 'admin')
-        with db_connection(AUTH_DB_PATH) as conn:
-            cursor = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("""
                 INSERT INTO announcements (title, body, target, created_by, created_at, updated_at, is_active)
                 VALUES (?, ?, ?, ?, ?, ?, 1)
             """), (title, body, target, admin_email, datetime.utcnow(), datetime.utcnow()))
-            new_id = cursor.lastrowid
             
-            if not new_id and is_postgres():
+            new_id = None
+            if not is_postgres():
+                new_id = cursor.lastrowid
+            else:
                 cursor.execute("SELECT LASTVAL()")
                 new_id = cursor.fetchone()[0]
                 
@@ -3181,8 +3182,8 @@ def admin_update_announcement(ann_id):
         if target not in ('student', 'faculty', 'all'):
             return jsonify({'success': False, 'error': 'target must be student, faculty, or all'}), 400
 
-        with db_connection(AUTH_DB_PATH) as conn:
-            cursor = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("SELECT id FROM announcements WHERE id = ?"), (ann_id,))
             if not cursor.fetchone():
                 return jsonify({'success': False, 'error': 'Announcement not found'}), 404
@@ -3200,13 +3201,12 @@ def admin_update_announcement(ann_id):
 def admin_delete_announcement(ann_id):
     """Delete an announcement."""
     try:
-        with db_connection(AUTH_DB_PATH) as conn:
-            cursor = conn.cursor()
+        from core.db_config import db_cursor
+        with db_cursor('students') as cursor:
             cursor.execute(adapt_query("SELECT id FROM announcements WHERE id = ?"), (ann_id,))
             if not cursor.fetchone():
                 return jsonify({'success': False, 'error': 'Announcement not found'}), 404
             cursor.execute(adapt_query("DELETE FROM announcements WHERE id = ?"), (ann_id,))
-            conn.commit()
         return jsonify({'success': True, 'message': 'Announcement deleted'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3223,7 +3223,7 @@ def get_active_announcements():
             cursor.execute(adapt_query(f"""
                 SELECT id, title, body, target, created_at
                 FROM announcements
-                WHERE is_active = {get_bool_query(True)}
+                WHERE is_active = 1
                   AND (target = 'all' OR target = ?)
                 ORDER BY created_at DESC
                 LIMIT 10

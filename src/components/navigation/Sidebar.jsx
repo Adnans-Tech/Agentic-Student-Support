@@ -79,11 +79,13 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     // Build profile photo URL
     let photoUrl = null;
     try {
-        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const storedUser = JSON.parse(localStorage.getItem('aceUser') || '{}');
         if (storedUser.profile_photo) {
             photoUrl = `${API_BASE}${storedUser.profile_photo}`;
         }
-    } catch { }
+    } catch (err) {
+        console.error('Error parsing user data from localStorage:', err);
+    }
 
     const getInitials = (name) => {
         if (!name) return '?';

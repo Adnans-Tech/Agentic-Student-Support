@@ -307,9 +307,9 @@ def _get_faculty_tickets(faculty_email: str, status_filter: Optional[str] = None
         if not student_emails:
             return []
 
+        from core.db_config import get_dict_cursor
         with get_db_connection('tickets') as t_conn:
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
+            tc = get_dict_cursor(t_conn)
 
             placeholders = ",".join(["?"] * len(student_emails))
             if status_filter:
@@ -354,9 +354,9 @@ def _resolve_ticket_in_db(
             sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
             student_emails = {r[0] for r in sc.fetchall()}
 
+        from core.db_config import get_dict_cursor
         with get_db_connection('tickets') as t_conn:
-            t_conn.row_factory = sqlite3.Row
-            tc = t_conn.cursor()
+            tc = get_dict_cursor(t_conn)
 
             tc.execute(adapt_query("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
             row = tc.fetchone()
