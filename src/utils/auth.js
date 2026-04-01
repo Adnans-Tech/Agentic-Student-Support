@@ -61,9 +61,12 @@ export const isAdmin = () => {
  * Get redirect path based on user role and admin flag
  */
 export const getDefaultRoute = () => {
+    const role = getUserRole();
+    if (role === 'admin') return '/admin/dashboard';
+    if (role === 'faculty') return '/faculty/dashboard';
+    if (role === 'student') return '/student/dashboard';
+    
     if (isAdmin()) return '/admin/dashboard';
-    if (isStudent()) return '/student/dashboard';
-    if (isFaculty()) return '/faculty/dashboard';
     return '/login';
 };
 

@@ -93,7 +93,7 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     };
 
     return (
-        <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''} ${isFaculty ? styles.facultySidebar : ''} ${isUserAdmin ? styles.adminSidebar : ''}`}>
+        <aside className={`${styles.sidebar} ${isCollapsed ? styles.collapsed : ''} ${isFacultyRoute ? styles.facultySidebar : ''} ${isAdminRoute ? styles.adminSidebar : ''}`}>
             {/* Toggle Button */}
             <motion.button
                 className={styles.toggleButton}
@@ -151,7 +151,7 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                     <div className={styles.userInfoWrapper}>
                         <span className={styles.userName}>{user?.full_name || user?.name}</span>
                         <span className={styles.userRole}>
-                            {isUserAdmin ? 'Admin' : (isFaculty ? 'Faculty' : 'Student')}
+                            {isAdminRoute ? 'Admin' : (isFacultyRoute || isFaculty ? 'Faculty' : 'Student')}
                         </span>
                     </div>
                 </div>
