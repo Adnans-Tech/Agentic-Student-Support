@@ -605,7 +605,8 @@ def verify_otp_endpoint():
                     })
             elif role == 'faculty':
                 cursor.execute(adapt_query("""
-                    SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge
+                    SELECT COALESCE(full_name, name, ''), employee_id, department, designation,
+                           COALESCE(subject_incharge, ''), COALESCE(class_incharge, '')
                     FROM faculty_profiles WHERE user_id = ?
                 """), (user_id,))
                 faculty = cursor.fetchone()
@@ -730,7 +731,8 @@ def login_user():
 
             elif role == 'faculty':
                 cursor.execute(adapt_query("""
-                    SELECT full_name, employee_id, department, designation, subject_incharge, class_incharge, timetable
+                    SELECT COALESCE(full_name, name, ''), employee_id, department, designation,
+                           COALESCE(subject_incharge, ''), COALESCE(class_incharge, ''), timetable
                     FROM faculty_profiles WHERE user_id = ?
                 """), (user_id,))
                 faculty = cursor.fetchone()
