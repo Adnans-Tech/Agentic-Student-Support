@@ -40,7 +40,7 @@ class FacultyProfileService:
         try:
             with db_cursor('students', dict_cursor=True) as cursor:
                 cursor.execute(adapt_query("""
-                    SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
+                    SELECT fp.id, COALESCE(fp.full_name, fp.name) as full_name, fp.employee_id, fp.department,
                            fp.designation, fp.subject_incharge, fp.class_incharge,
                            fp.phone, fp.profile_photo, fp.office_room, fp.bio,
                            fp.linkedin, fp.github, fp.researchgate, fp.timetable,
