@@ -391,7 +391,7 @@ def _resolve_ticket_in_db(
         t_conn = get_db_connection('tickets')
         tc = get_dict_cursor(t_conn)
 
-        tc.execute(adapt_query("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
+        tc.execute(adapt_query("SELECT ticket_id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
         row = tc.fetchone()
 
         if not row:
@@ -416,8 +416,10 @@ def _resolve_ticket_in_db(
         print(f"[FACULTY_ORCH] Ticket resolved: id={ticket_id}, faculty={faculty_email}")
         return {"success": True, "ticket_id": ticket_id}
     except Exception as exc:
-        print(f"[FACULTY_ORCH] _resolve_ticket_in_db error: {type(exc).__name__}")
-        return {"success": False, "error": f"Database error: {type(exc).__name__}"}
+        import traceback
+        traceback.print_exc()
+        print(f"[FACULTY_ORCH] _resolve_ticket_in_db error: {exc}")
+        return {"success": False, "error": f"Database error: {exc}"}
     finally:
         for c in (s_conn, t_conn):
             if c:
