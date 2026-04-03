@@ -362,7 +362,7 @@
 }
 
 .facultySidebar .brandName {
-    color: #FFFFFF;
+    color: var(--color-text-primary);
 }
 
 .facultySidebar .brandSub {
@@ -419,7 +419,7 @@
 }
 
 .adminSidebar .brandName {
-    color: #FFFFFF;
+    color: var(--color-text-primary);
 }
 
 .adminSidebar .brandSub {

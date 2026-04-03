@@ -354,21 +354,39 @@ def _resolve_ticket_in_db(
     """
     Writes resolved_by, resolved_at, resolution_note, status='Resolved' to tickets.db.
     Validates ticket existence and department scope before writing.
+    Admins are permitted to bypass department scoping.
     """
+    from core.db_config import adapt_query, get_db_connection, get_dict_cursor
+    
+    is_admin = False
+    try:
+        f_conn = get_db_connection('faculty_data')
+        fc = get_dict_cursor(f_conn)
+        fc.execute(adapt_query("SELECT is_admin, role FROM users WHERE email = ?"), (faculty_email,))
+        u_row = fc.fetchone()
+        if u_row:
+            if isinstance(u_row, dict):
+                is_admin = bool(u_row.get('is_admin')) or str(u_row.get('role')).lower() == 'admin'
+            else:
+                is_admin = bool(u_row[0]) or str(u_row[1]).lower() == 'admin'
+        f_conn.close()
+    except Exception as e:
+        print(f"[FACULTY_ORCH] Admin check failed: {e}")
+
     dept = _get_faculty_department(faculty_email)
-    if not dept:
+    if not is_admin and not dept:
         return {"success": False, "error": "Could not determine your department. Please check your profile."}
 
     s_conn = None
     t_conn = None
     try:
-        from core.db_config import adapt_query, get_db_connection, get_dict_cursor
-        s_conn = get_db_connection('students')
-        sc = s_conn.cursor()
-        sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
-        student_emails = {r[0] for r in sc.fetchall()}
-        s_conn.close()
-        s_conn = None
+        if not is_admin:
+            s_conn = get_db_connection('students')
+            sc = s_conn.cursor()
+            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
+            student_emails = {r[0] for r in sc.fetchall()}
+            s_conn.close()
+            s_conn = None
 
         t_conn = get_db_connection('tickets')
         tc = get_dict_cursor(t_conn)
@@ -379,7 +397,7 @@ def _resolve_ticket_in_db(
         if not row:
             return {"success": False, "error": f"Ticket **{ticket_id}** not found."}
 
-        if row["student_email"] not in student_emails:
+        if not is_admin and row["student_email"] not in student_emails:
             return {"success": False, "error": "You are not authorised to resolve this ticket (department mismatch)."}
 
         if row["status"] in ("Resolved", "Closed"):
@@ -888,6 +906,52 @@ class FacultyOrchestratorAgent:
         # Collecting resolution note — generate polished body via LLM and show card
         if resolution_note is None:
             note = msg.strip()
+
+            # --- LLM Intent Classification Mid-Flow ---
+            prompt = f"""
+            The user is currently being asked to provide a resolution note for ticket {ticket_id}.
+            User's message: "{note}"
+            Classify their intent into exactly one of three categories:
+            'QUESTION' - If they are asking for details, describing the issue, or asking a question about the ticket.
+            'CANCEL' - If they are trying to stop, abort, or cancel resolving the ticket.
+            'RESOLUTION' - If they are describing what they did to resolve the issue, or just providing standard text to close it.
+            Return ONLY the single word (QUESTION, CANCEL, or RESOLUTION).
+            """
+            try:
+                intent_raw = self._llm.generate_content(prompt)
+                intent_str = intent_raw.text.strip().upper()
+            except Exception:
+                intent_str = "RESOLUTION" # fallback if LLM fails
+
+            if "CANCEL" in intent_str:
+                _clear_flow(session_id)
+                return self._reply("🚫 Ticket resolution cancelled.", "TICKET_RESOLVE_CANCELLED", session_id)
+            
+            if "QUESTION" in intent_str:
+                from agents.ticket_db import TicketDatabase
+                db = TicketDatabase()
+                t_details = db.get_ticket(ticket_id)
+                if t_details:
+                    desc = t_details.get('description', 'No description provided.')
+                    subj = t_details.get('subject', 'No subject')
+                    status = t_details.get('status', 'Unknown')
+                    student = t_details.get('student_email', 'Unknown')
+                    return self._reply(
+                        f"**Details for {ticket_id}:**\n\n"
+                        f"**Student:** {student}\n"
+                        f"**Subject:** {subj}\n"
+                        f"**Status:** {status}\n"
+                        f"**Description:** {desc}\n\n"
+                        f"Please provide your resolution note when you are ready, or type 'cancel' to exit.",
+                        "TICKET_RESOLVE", session_id
+                    )
+                else:
+                    return self._reply(
+                        f"Sorry, I couldn't fetch details for {ticket_id}. "
+                        "Please provide your resolution note, or type 'cancel' to exit.",
+                        "TICKET_RESOLVE", session_id
+                    )
+
             if len(note) < 5:
                 return self._reply("The resolution note seems too short. Please describe what was done to resolve the issue.", "TICKET_RESOLVE", session_id)
 
