@@ -215,13 +215,14 @@ const UserManagement = () => {
                                 <th>User</th>
                                 <th>{activeTab === 'students' ? 'Roll Number' : 'Employee ID'}</th>
                                 <th>Status</th>
+                                <th>Registration</th>
                                 <th>Account Role</th>
                                 <th style={{ textAlign: 'right' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {!loading && users.map(user => (
-                                <tr key={user.user_id}>
+                            {!loading && users.map((user, idx) => (
+                                <tr key={user.user_id || `unregistered-${user.id || idx}`}>
                                     <td>
                                         <div className={styles.userCell}>
                                             <div className={styles.userAvatar}>
@@ -242,6 +243,18 @@ const UserManagement = () => {
                                         </span>
                                     </td>
                                     <td>
+                                        {user.is_registered ? (
+                                            <span style={{ color: '#059669', fontWeight: 500, fontSize: '13px' }}>
+                                                <UserCheck size={14} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                                                Registered
+                                            </span>
+                                        ) : (
+                                            <span style={{ color: 'var(--color-text-muted)', fontWeight: 500, fontSize: '13px' }}>
+                                                Unregistered
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td>
                                         {user.is_admin ? (
                                             <span style={{ color: '#F59E0B', fontWeight: 600, fontSize: '12px' }}>
                                                 <Shield size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
@@ -257,9 +270,9 @@ const UserManagement = () => {
                                         <div className={styles.actionGroup} style={{ justifyContent: 'flex-end' }}>
                                             <button
                                                 className={styles.actionBtn}
-                                                title="Reset Password"
+                                                title={user.is_registered ? "Reset Password" : "Can't reset password for unregistered user"}
                                                 onClick={() => handlePasswordReset(user.user_id, user.name)}
-                                                disabled={actionLoading === `pwd-${user.user_id}`}
+                                                disabled={!user.is_registered || actionLoading === `pwd-${user.user_id}`}
                                             >
                                                 <Key size={14} />
                                             </button>
@@ -267,9 +280,9 @@ const UserManagement = () => {
                                             {(!user.is_admin) && (
                                                 <button
                                                     className={`${styles.actionBtn} ${user.is_active ? styles.danger : styles.success}`}
-                                                    title={user.is_active ? "Deactivate Account" : "Activate Account"}
+                                                    title={!user.is_registered ? "Account not created yet" : (user.is_active ? "Deactivate Account" : "Activate Account")}
                                                     onClick={() => handleToggleActive(user.user_id, user.is_active)}
-                                                    disabled={actionLoading === user.user_id}
+                                                    disabled={!user.is_registered || actionLoading === user.user_id}
                                                 >
                                                     {user.is_active ? <UserX size={14} /> : <UserCheck size={14} />}
                                                 </button>

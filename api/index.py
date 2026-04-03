@@ -2890,7 +2890,7 @@ def admin_get_departments():
 @app.route('/api/admin/users/students', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_list_students():
-    """List registered students. Native JOIN for Postgres; Python-stitching for SQLite fallback."""
+    """List all students with an explicit is_registered flag. Native LEFT JOIN for Postgres; Python-stitching for SQLite fallback."""
     dept = (request.args.get('dept', '') or '').strip().upper()
     q = (request.args.get('q', '') or '').strip()
 
@@ -2903,10 +2903,12 @@ def admin_list_students():
                     SELECT s.id, s.email, s.roll_number, s.full_name,
                            s.department, s.year, s.phone,
                            s.created_at, s.last_login,
-                           u.id as user_id, COALESCE(u.is_active, TRUE) as is_active,
-                           COALESCE(u.is_admin, FALSE) as is_admin
+                           u.id as user_id, 
+                           COALESCE(u.is_active, TRUE) as is_active,
+                           COALESCE(u.is_admin, FALSE) as is_admin,
+                           (u.id IS NOT NULL) as is_registered
                     FROM students s
-                    JOIN users u ON s.email = u.email
+                    LEFT JOIN users u ON s.email = u.email
                     WHERE 1=1
                 """
                 params = []
@@ -2931,8 +2933,7 @@ def admin_list_students():
                     students.append(d)
                 return jsonify({'success': True, 'data': students, 'count': len(students)})
         else:
-            # === SQLITE FALLBACK: Cross-DB Python Stitching ===
-            # 1. Fetch registered students from users
+            # === SQLITE FALLBACK ===
             registered_users = {}
             with db_connection(AUTH_DB_PATH) as conn:
                 cur = conn.cursor()
@@ -2940,7 +2941,6 @@ def admin_list_students():
                 for r in cur.fetchall():
                     registered_users[r['email'].lower()] = dict(r)
             
-            # 2. Fetch student records and filter
             students = []
             with db_connection('students') as conn:
                 cur = conn.cursor()
@@ -2959,13 +2959,13 @@ def admin_list_students():
                 for row in cur.fetchall():
                     s_dict = dict(row)
                     em = s_dict.get('email', '').lower()
-                    if em in registered_users:
-                        u_data = registered_users[em]
-                        s_dict['user_id'] = u_data['user_id']
-                        s_dict['is_active'] = u_data.get('is_active', True)
-                        s_dict['is_admin'] = u_data.get('is_admin', False)
-                        s_dict['name'] = s_dict.get('full_name', '')
-                        students.append(s_dict)
+                    u_data = registered_users.get(em, {})
+                    s_dict['user_id'] = u_data.get('user_id', None)
+                    s_dict['is_active'] = u_data.get('is_active', True)
+                    s_dict['is_admin'] = u_data.get('is_admin', False)
+                    s_dict['is_registered'] = bool(u_data.get('user_id'))
+                    s_dict['name'] = s_dict.get('full_name', '')
+                    students.append(s_dict)
             
             return jsonify({'success': True, 'data': students[:50], 'count': len(students[:50])})
     except Exception as e:
@@ -2977,7 +2977,7 @@ def admin_list_students():
 @app.route('/api/admin/users/faculty', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_list_faculty():
-    """List all faculty. Native LEFT JOIN for Postgres; Python-stitching for SQLite fallback."""
+    """List all faculty with an explicit is_registered flag. Native LEFT JOIN for Postgres; Python-stitching for SQLite fallback."""
     dept = (request.args.get('dept', '') or '').strip().upper()
     q = (request.args.get('q', '') or '').strip()
 
@@ -2993,7 +2993,8 @@ def admin_list_faculty():
                            u.id as user_id,
                            COALESCE(u.is_active, TRUE) as is_active,
                            COALESCE(u.is_admin, FALSE) as is_admin,
-                           u.created_at
+                           u.created_at,
+                           (u.id IS NOT NULL) as is_registered
                     FROM faculty_profiles fp
                     LEFT JOIN users u ON fp.email = u.email
                     WHERE 1=1
@@ -3050,6 +3051,7 @@ def admin_list_faculty():
                     f_dict['user_id'] = u_data.get('user_id', None)
                     f_dict['is_active'] = u_data.get('is_active', True)
                     f_dict['is_admin'] = u_data.get('is_admin', False)
+                    f_dict['is_registered'] = bool(u_data.get('user_id'))
                     f_dict['created_at'] = u_data.get('created_at', None)
                     f_dict['name'] = f_dict.get('full_name', '')
                     if not f_dict.get('email'):
