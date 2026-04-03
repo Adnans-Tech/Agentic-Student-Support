@@ -27,7 +27,12 @@ export const getUserRole = () => {
     if (activeRole) return activeRole;
 
     const user = getCurrentUser();
-    return user?.role || null;
+    if (!user) return null;
+    
+    // Explicitly check for admin privilege as a high-priority fallback
+    if (user.is_admin) return 'admin';
+    
+    return user.role || 'student';
 };
 
 /**

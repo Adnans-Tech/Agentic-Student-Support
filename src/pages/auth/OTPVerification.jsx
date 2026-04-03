@@ -92,9 +92,14 @@ const OTPVerification = () => {
             const response = await authService.verifyOTP(email, otpValue);
 
             if (response.success) {
-                // Redirect based on role
+                // Store the role context selected during login
                 const userRole = response.user?.role || role;
-                if (userRole === 'faculty') {
+                authService.setActiveRole(userRole);
+
+                // Redirect based on role
+                if (userRole === 'admin') {
+                    navigate('/admin/dashboard');
+                } else if (userRole === 'faculty') {
                     navigate('/faculty/dashboard');
                 } else {
                     navigate('/student/dashboard');

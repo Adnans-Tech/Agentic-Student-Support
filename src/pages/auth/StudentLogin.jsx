@@ -92,7 +92,7 @@ const Login = () => {
                     navigate('/student/dashboard');
                 }
             } else if (response.requires_verification) {
-                navigate('/verify-otp', { state: { email: formData.email } });
+                navigate('/verify-otp', { state: { email: formData.email, role: role } });
             } else {
                 setToast({
                     show: true,
@@ -103,7 +103,7 @@ const Login = () => {
         } catch (error) {
             const errorData = error.response?.data;
             if (errorData?.requires_verification) {
-                navigate('/verify-otp', { state: { email: formData.email } });
+                navigate('/verify-otp', { state: { email: formData.email, role: role } });
             } else {
                 setToast({
                     show: true,
