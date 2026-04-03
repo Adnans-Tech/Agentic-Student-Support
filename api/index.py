@@ -2901,12 +2901,12 @@ def admin_list_students():
 
             query = """
                 SELECT s.id, s.email, s.roll_number, s.full_name,
-                       s.department, s.year, s.section, s.phone,
+                       s.department, s.year, s.phone,
                        s.created_at, s.last_login,
-                       u.id as user_id, COALESCE(u.is_active, 1) as is_active,
-                       COALESCE(u.is_admin, 0) as is_admin
+                       u.id as user_id, COALESCE(u.is_active, TRUE) as is_active,
+                       COALESCE(u.is_admin, FALSE) as is_admin
                 FROM students s
-                JOIN users u ON s.user_id = u.id
+                JOIN users u ON s.email = u.email
                 WHERE 1=1
             """
             params = []
@@ -2944,11 +2944,11 @@ def admin_list_faculty():
             cursor = conn.cursor()
 
             query = """
-                SELECT fp.id, fp.full_name, fp.employee_id, fp.department,
-                       fp.designation, fp.subject_incharge, fp.class_incharge,
+                SELECT fp.id, fp.name as full_name, fp.employee_id, fp.department,
+                       fp.designation,
                        u.email, u.id as user_id,
-                       COALESCE(u.is_active, 1) as is_active,
-                       COALESCE(u.is_admin, 0) as is_admin,
+                       COALESCE(u.is_active, TRUE) as is_active,
+                       COALESCE(u.is_admin, FALSE) as is_admin,
                        u.created_at
                 FROM faculty_profiles fp
                 JOIN users u ON fp.user_id = u.id
@@ -2959,11 +2959,11 @@ def admin_list_faculty():
                 query += " AND fp.department = ?"
                 params.append(dept)
             if q:
-                query += " AND (LOWER(fp.full_name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
+                query += " AND (LOWER(fp.name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
                 q_like = f'%{q.lower()}%'
                 params.extend([q_like, q_like, q_like])
                 
-            query += " ORDER BY fp.full_name ASC LIMIT 50"
+            query += " ORDER BY fp.name ASC LIMIT 50"
             cursor.execute(adapt_query(query), params)
 
             faculty = []
