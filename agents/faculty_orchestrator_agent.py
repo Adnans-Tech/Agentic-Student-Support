@@ -1424,6 +1424,7 @@ class FacultyOrchestratorAgent:
             print(f"[FACULTY_ORCH] execute_email_send error: {type(exc).__name__}")
             result = {"success": False, "message": str(exc)}
 
+        if result.get("success"):
             # Log sent email to faculty_sent_emails table
             try:
                 from core.db_config import db_cursor
@@ -1443,6 +1444,7 @@ class FacultyOrchestratorAgent:
                 "success": True,
                 "message": f"✅ Email sent successfully to **{draft_to}**!",
             }
+
         return {
             "success": False,
             "message": result.get("message") or result.get("error") or "Unknown error",
