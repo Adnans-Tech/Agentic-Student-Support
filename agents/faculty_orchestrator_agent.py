@@ -609,6 +609,12 @@ class FacultyOrchestratorAgent:
         roll: Optional[str] = slots.get("roll_number")
         raw_year = slots.get("year")
         raw_sec = slots.get("section")
+        
+        # Aggressive name extraction if slots missed it (e.g. "Who is John Doe")
+        if not name and not roll and not email:
+            who_match = re.search(r'\bwho\s+is\s+([a-zA-Z\s]{3,})\b', msg_lower)
+            if who_match:
+                name = who_match.group(1).strip()
 
         year: Optional[int] = normalise_year(str(raw_year)) if raw_year is not None else None
         section: Optional[str] = normalise_section(str(raw_sec)) if raw_sec is not None else None
@@ -644,39 +650,73 @@ class FacultyOrchestratorAgent:
 
         # --- Email address lookup (name + year + section) ---
         if name and (re.search(r'\bemail\b', msg_lower) or re.search(r'\bcontact\b', msg_lower)):
+            # If name is provided but year/section are missing, search by name first to see if it's unique
+            matches = self._repo.find_by_name(name)
+            if len(matches) == 1:
+                return self._reply(
+                    f"✅ Found student record:\n\n{format_student_card(matches[0])}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
+            elif len(matches) > 1:
+                return self._reply(
+                    f"Found multiple students matching **{name}**. Which one do you mean?\n\n"
+                    f"{format_student_list(matches, show_email=True)}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
+
             if year is None or section is None:
                 # Ask for missing slots
                 missing = []
                 if year is None:
-                    missing.append("**year** (e.g., 1st, 2nd, 3rd, 4th)")
+                    missing.append("**year**")
                 if section is None:
-                    missing.append("**section** (A, B, or C)")
+                    missing.append("**section**")
                 return self._reply(
-                    f"To look up the email for **{name}**, I also need: {' and '.join(missing)}. "
-                    "Could you provide those?",
+                    f"To look up the email for **{name}**, could you provide the {' and '.join(missing)}?",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
-            record = self._repo.get_email_for_name_year_section(name, year, section)
+            record = self._repo.get_email_for_name_year_section(name, year, section or "")
             if record:
                 return self._reply(
-                    f"✅ Email address for **{name}** (Year {year}, Section {section}):\n\n"
-                    f"📧 {record['email']}\n\n"
-                    f"Full record: {format_student_card(record)}",
+                    f"✅ Details for **{name}**:\n\n"
+                    f"{format_student_card(record)}",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
             # Check if multiple matches exist
             matches = self._repo.exists_in_year_section(name, year, section)
             if len(matches) > 1:
                 return self._reply(
-                    f"Multiple students match **{name}** in Year {year}, Section {section}:\n\n"
-                    f"{format_student_list(matches, show_email=True)}\n\n"
-                    "Please specify which student you mean.",
+                    f"Multiple results for **{name}** in Year {year}, Section {section}:\n\n"
+                    f"{format_student_list(matches, show_email=True)}",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
             return self._reply(
                 f"❌ No record found for **{name}** in Year {year}, Section {section}.",
                 "STUDENT_RECORD_QUERY", session_id,
             )
+
+        # --- General Name Search / Similar Names ---
+        if name:
+            matches = self._repo.find_by_name(name)
+            if not matches:
+                # One last try: if name was "John Doe", maybe search "John"
+                parts = name.split()
+                if len(parts) > 1:
+                    matches = self._repo.find_by_name(parts[0])
+            
+            if len(matches) == 1:
+                return self._reply(
+                    f"✅ Found matching student:\n\n{format_student_card(matches[0])}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
+            elif len(matches) > 1:
+                return self._reply(
+                    f"I found {len(matches)} students with similar names matching **{name}**:\n\n"
+                    f"{format_student_list(matches, show_email=True)}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
+            else:
+                return self._reply(f"❌ No student record found matching **{name}**.", "STUDENT_RECORD_QUERY", session_id)
 
         # --- Presence check (name + year + section) ---
         if name and (
@@ -685,16 +725,6 @@ class FacultyOrchestratorAgent:
             re.search(r'\battending\b', msg_lower) or
             re.search(r'\bin section\b', msg_lower)
         ):
-            if year is None or section is None:
-                missing = []
-                if year is None:
-                    missing.append("**year**")
-                if section is None:
-                    missing.append("**section**")
-                return self._reply(
-                    f"Could you also tell me the {' and '.join(missing)} to check for **{name}**?",
-                    "STUDENT_RECORD_QUERY", session_id,
-                )
             matches = self._repo.exists_in_year_section(name, year, section)
             if len(matches) == 1:
                 s = matches[0]

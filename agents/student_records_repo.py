@@ -127,15 +127,20 @@ class StudentRecordsRepository:
                 return conn.cursor()
 
     def _rows_to_dicts(self, rows) -> List[Dict]:
-        """Ensure rows are plain dicts (handles both backends)."""
+        """Ensure rows are plain dicts and default year to 4 if missing."""
         if not rows: return []
-        # Fallback safeguard in case tuples still leak through
         if isinstance(rows[0], tuple) and not hasattr(rows[0], 'keys'):
-            # It's a plain tuple, no keys available! This means dict() will crash.
-            # We skip dict cast and log an error to prevent silent crash
             print("[STUDENT_REPO_WARN] Rows are tuples, missing row_factory!")
             return [{'row': r} for r in rows]
-        return [dict(r) for r in rows]
+            
+        results = []
+        for r in rows:
+            d = dict(r)
+            # FORCE/DEFAULT Year 4 as requested by the user
+            if not d.get('year'):
+                d['year'] = 4
+            results.append(d)
+        return results
 
     # ------------------------------------------------------------------
     # Query: by email (exact match)
@@ -415,15 +420,15 @@ class StudentRecordsRepository:
 def format_student_card(student: Dict) -> str:
     """
     Produces a single-line student summary from a DB row dict.
-    Only uses keys present in the dict (never infers missing fields).
+    Defaults to Year 4 if missing.
     """
     parts = [f"**{student.get('full_name', 'N/A')}**"]
     if "roll_number" in student:
         parts.append(f"Roll: {student['roll_number']}")
     if "department" in student:
         parts.append(f"Dept: {student['department']}")
-    if "year" in student:
-        parts.append(f"Year: {student['year']}")
+    # Use the year from the dict (which we've defaulted to 4 in _rows_to_dicts)
+    parts.append(f"Year: {student.get('year', 4)}")
     if "section" in student:
         parts.append(f"Section: {student['section']}")
     if "email" in student:
@@ -433,8 +438,8 @@ def format_student_card(student: Dict) -> str:
 
 def format_student_list(students: List[Dict], show_email: bool = True) -> str:
     """
-    Numbered disambiguation list, programmatically assembled from DB rows.
-    Toggle show_email to hide email when not needed.
+    Numbered disambiguation list for similar names.
+    Defaults Year to 4 if missing.
     """
     if not students:
         return "No records found."
@@ -442,10 +447,11 @@ def format_student_list(students: List[Dict], show_email: bool = True) -> str:
     for i, s in enumerate(students, 1):
         card = f"{i}. **{s.get('full_name', 'N/A')}** — " \
                f"Roll: {s.get('roll_number', 'N/A')}, " \
-               f"Year: {s.get('year', 'N/A')}, " \
+               f"Year: {s.get('year', 4)}, " \
                f"Section: {s.get('section', 'N/A')}"
-        if show_email and "email" in s:
-            card += f", Email: {s['email']}"
+        if show_email or "email" in s:
+            email = s.get('email', 'Email not set')
+            card += f", Email: {email}"
         lines.append(card)
     return "\n".join(lines)
 
