@@ -2895,10 +2895,10 @@ def admin_list_students():
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        from core.db_config import is_postgres
+        from core.db_config import is_postgres, get_dict_cursor
         if is_postgres():
             with db_connection('students') as conn: # In Postgres, 'students' connects to central DB
-                cursor = conn.cursor()
+                cursor = get_dict_cursor(conn)
                 query = """
                     SELECT s.id, s.email, s.roll_number, s.full_name,
                            s.department, s.year, s.phone,
@@ -2925,6 +2925,9 @@ def admin_list_students():
                 for row in cursor.fetchall():
                     d = dict(row)
                     d['name'] = d.get('full_name', '')
+                    for k, v in d.items():
+                        if hasattr(v, 'isoformat'):
+                            d[k] = v.isoformat()
                     students.append(d)
                 return jsonify({'success': True, 'data': students, 'count': len(students)})
         else:
@@ -2979,10 +2982,10 @@ def admin_list_faculty():
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        from core.db_config import is_postgres
+        from core.db_config import is_postgres, get_dict_cursor
         if is_postgres():
             with db_connection('faculty_data') as conn:
-                cursor = conn.cursor()
+                cursor = get_dict_cursor(conn)
                 query = """
                     SELECT fp.id, fp.name as full_name, fp.employee_id, fp.department,
                            fp.designation,
@@ -3000,7 +3003,7 @@ def admin_list_faculty():
                     query += " AND fp.department = ?"
                     params.append(dept)
                 if q:
-                    query += " AND (LOWER(fp.name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(fp.email) LIKE ?)"
+                    query += " AND (LOWER(fp.name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
                     q_like = f'%{q.lower()}%'
                     params.extend([q_like, q_like, q_like])
                     
@@ -3011,6 +3014,9 @@ def admin_list_faculty():
                 for row in cursor.fetchall():
                     d = dict(row)
                     d['name'] = d.get('full_name', '')
+                    for k, v in d.items():
+                        if hasattr(v, 'isoformat'):
+                            d[k] = v.isoformat()
                     faculty.append(d)
                 return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
         else:
