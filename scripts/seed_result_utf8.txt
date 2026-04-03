@@ -1,0 +1,64 @@
+﻿python : C:\Users\mohd 
+adnan\Desktop\ACE SUPPOR
+T\scripts\seed_admin_fac
+ulty.py:59: 
+DeprecationWarning: date
+time.datetime.utcnow() 
+is deprecated and 
+scheduled for removal 
+in a future version. 
+Use timezone-aware 
+objects to represent 
+datetimes in UTC: dateti
+me.datetime.now(datetime
+.UTC).
+At line:1 char:1
++ python scripts/seed_ad
+min_faculty.py 2>&1 | 
+Out-File -FilePath 
+script ...
++ ~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo      
+        : NotSpecified  
+  : (C:\Users\mohd a.   
+ ..(datetime.UTC).:S    
+tring) [], RemoteEx    
+ception
+    + FullyQualifiedErr 
+   orId : NativeComman  
+  dError
+ 
+  now = 
+datetime.utcnow()
+[INFO] Connecting to Supabase...
+[OK]   Connected.
+
+[INFO] Ensuring faculty_profiles has all required columns...
+  [OK] ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS full_n
+  [OK] ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS subjec
+  [OK] ALTER TABLE faculty_profiles ADD COLUMN IF NOT EXISTS class_
+[OK]   Columns verified.
+
+[INFO] Looking up user: mailtomohdadnan@gmail.com
+[INFO] Found existing user id=8. Updating...
+[OK]   User updated.
+
+[INFO] Upserting faculty profile for user_id=8...
+[INFO] Profile exists. Updating...
+[OK]   Faculty profile updated.
+
+============================================================
+  SEED COMPLETE - Supabase updated!
+============================================================
+  Email     : mailtomohdadnan@gmail.com
+  Password  : Adnan786!
+  user_id   : 8
+  role      : faculty  (is_admin = TRUE)
+  Name      : Mohammed Adnan
+  Dept      : CSM
+
+  On Vercel:
+    Faculty Tab -> faculty dashboard
+    Admin Tab   -> admin dashboard
+============================================================

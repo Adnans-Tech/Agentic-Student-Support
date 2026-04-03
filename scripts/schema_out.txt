@@ -1,0 +1,73 @@
+[OK] Connected.
+
+=======================================================
+TABLE: users
+=======================================================
+  instance_id               uuid                 nullable=YES   default=None
+  id                        integer              nullable=NO    default=nextval('users_id_seq'::regclass)
+  id                        uuid                 nullable=NO    default=None
+  email                     character varying    nullable=NO    default=None
+  password_hash             character varying    nullable=NO    default=None
+  aud                       character varying    nullable=YES   default=None
+  role                      character varying    nullable=YES   default=None
+  role                      character varying    nullable=NO    default=None
+  full_name                 character varying    nullable=YES   default=None
+  email                     character varying    nullable=YES   default=None
+  encrypted_password        character varying    nullable=YES   default=None
+  email_verified            boolean              nullable=YES   default=false
+  verification_token        character varying    nullable=YES   default=None
+  email_confirmed_at        timestamp with time zone nullable=YES   default=None
+  reset_token               character varying    nullable=YES   default=None
+  invited_at                timestamp with time zone nullable=YES   default=None
+  confirmation_token        character varying    nullable=YES   default=None
+  created_at                timestamp without time zone nullable=YES   default=CURRENT_TIMESTAMP
+  confirmation_sent_at      timestamp with time zone nullable=YES   default=None
+  is_admin                  boolean              nullable=YES   default=false
+  is_active                 boolean              nullable=YES   default=true
+  recovery_token            character varying    nullable=YES   default=None
+  recovery_sent_at          timestamp with time zone nullable=YES   default=None
+  last_login                timestamp without time zone nullable=YES   default=None
+  email_change_token_new    character varying    nullable=YES   default=None
+  email_change              character varying    nullable=YES   default=None
+  email_change_sent_at      timestamp with time zone nullable=YES   default=None
+  last_sign_in_at           timestamp with time zone nullable=YES   default=None
+  raw_app_meta_data         jsonb                nullable=YES   default=None
+  raw_user_meta_data        jsonb                nullable=YES   default=None
+  is_super_admin            boolean              nullable=YES   default=None
+  created_at                timestamp with time zone nullable=YES   default=None
+  updated_at                timestamp with time zone nullable=YES   default=None
+  phone                     text                 nullable=YES   default=NULL::character varying
+  phone_confirmed_at        timestamp with time zone nullable=YES   default=None
+  phone_change              text                 nullable=YES   default=''::character varying
+  phone_change_token        character varying    nullable=YES   default=''::character varying
+  phone_change_sent_at      timestamp with time zone nullable=YES   default=None
+  confirmed_at              timestamp with time zone nullable=YES   default=None
+  email_change_token_current character varying    nullable=YES   default=''::character varying
+  email_change_confirm_status smallint             nullable=YES   default=0
+  banned_until              timestamp with time zone nullable=YES   default=None
+  reauthentication_token    character varying    nullable=YES   default=''::character varying
+  reauthentication_sent_at  timestamp with time zone nullable=YES   default=None
+  is_sso_user               boolean              nullable=NO    default=false
+  deleted_at                timestamp with time zone nullable=YES   default=None
+  is_anonymous              boolean              nullable=NO    default=false
+
+=======================================================
+TABLE: faculty_profiles
+=======================================================
+  id                        integer              nullable=NO    default=nextval('faculty_profiles_id_seq'::regclass)
+  user_id                   integer              nullable=YES   default=None
+  employee_id               character varying    nullable=YES   default=None
+  name                      character varying    nullable=YES   default=None
+  designation               character varying    nullable=YES   default=None
+  department                character varying    nullable=YES   default=None
+  email                     character varying    nullable=YES   default=None
+  phone                     character varying    nullable=YES   default=None
+  bio                       text                 nullable=YES   default=None
+  profile_photo             character varying    nullable=YES   default=None
+  linkedin                  character varying    nullable=YES   default=None
+  github                    character varying    nullable=YES   default=None
+  researchgate              character varying    nullable=YES   default=None
+  timetable                 text                 nullable=YES   default='{}'::text
+  created_at                timestamp without time zone nullable=YES   default=CURRENT_TIMESTAMP
+  is_verified               boolean              nullable=YES   default=false
+  last_login                timestamp without time zone nullable=YES   default=None

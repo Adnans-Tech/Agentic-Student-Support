@@ -639,14 +639,26 @@ class FacultyOrchestratorAgent:
         # Regex: 2-digit year prefix + 6+ alphanumeric chars (handles 22AG1A66A9, 22AG1A6665, etc.)
         _ROLL_RE = re.compile(r'\b\d{2}[A-Za-z0-9]{6,}\b', re.I)
         if roll or _ROLL_RE.search(msg):
-            target_roll = roll or _ROLL_RE.search(msg).group()
-            record = self._repo.find_by_roll(str(target_roll))
+            target_roll = str(roll or _ROLL_RE.search(msg).group()).strip()
+            
+            # Additional diagnostic logging for Vercel troubleshooting
+            from core.db_config import is_postgres
+            backend = "PostgreSQL" if is_postgres() else "SQLite"
+            print(f"[FACULTY_ORCH] Searching {backend} for roll: {target_roll}")
+            
+            record = self._repo.find_by_roll(target_roll)
             if record:
                 return self._reply(
-                    f"✅ Found student:\n\n{format_student_card(record)}",
+                    f"✅ Found student record in **{backend}**:\n\n{format_student_card(record)}",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
-            return self._reply("❌ No student record found for that roll number.", "STUDENT_RECORD_QUERY", session_id)
+            
+            # Enhanced error message to show what was searched
+            return self._reply(
+                f"❌ No student record found for roll number **{target_roll}** in the **{backend}** database.\n\n"
+                "If this record exists in our local system, please ensure it has been synced to the production database.", 
+                "STUDENT_RECORD_QUERY", session_id
+            )
 
         # --- Email address lookup (name + year + section) ---
         if name and (re.search(r'\bemail\b', msg_lower) or re.search(r'\bcontact\b', msg_lower)):
