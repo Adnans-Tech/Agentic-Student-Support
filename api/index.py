@@ -2890,89 +2890,169 @@ def admin_get_departments():
 @app.route('/api/admin/users/students', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_list_students():
-    """List students filtered by department (required) and optional name/roll query."""
+    """List registered students. Native JOIN for Postgres; Python-stitching for SQLite fallback."""
     dept = (request.args.get('dept', '') or '').strip().upper()
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        with db_connection(AUTH_DB_PATH) as conn:
-            # row_factory handled by db_cursor
-            cursor = conn.cursor()
-
-            query = """
-                SELECT s.id, s.email, s.roll_number, s.full_name,
-                       s.department, s.year, s.phone,
-                       s.created_at, s.last_login,
-                       u.id as user_id, COALESCE(u.is_active, TRUE) as is_active,
-                       COALESCE(u.is_admin, FALSE) as is_admin
-                FROM students s
-                JOIN users u ON s.email = u.email
-                WHERE 1=1
-            """
-            params = []
-            if dept:
-                query += " AND s.department = ?"
-                params.append(dept)
-            if q:
-                query += " AND (LOWER(s.full_name) LIKE ? OR LOWER(s.roll_number) LIKE ? OR LOWER(s.email) LIKE ?)"
-                q_like = f'%{q.lower()}%'
-                params.extend([q_like, q_like, q_like])
+        from core.db_config import is_postgres
+        if is_postgres():
+            with db_connection('students') as conn: # In Postgres, 'students' connects to central DB
+                cursor = conn.cursor()
+                query = """
+                    SELECT s.id, s.email, s.roll_number, s.full_name,
+                           s.department, s.year, s.phone,
+                           s.created_at, s.last_login,
+                           u.id as user_id, COALESCE(u.is_active, TRUE) as is_active,
+                           COALESCE(u.is_admin, FALSE) as is_admin
+                    FROM students s
+                    JOIN users u ON s.email = u.email
+                    WHERE 1=1
+                """
+                params = []
+                if dept:
+                    query += " AND s.department = ?"
+                    params.append(dept)
+                if q:
+                    query += " AND (LOWER(s.full_name) LIKE ? OR LOWER(s.roll_number) LIKE ? OR LOWER(s.email) LIKE ?)"
+                    q_like = f'%{q.lower()}%'
+                    params.extend([q_like, q_like, q_like])
+                    
+                query += " ORDER BY s.full_name ASC LIMIT 50"
+                cursor.execute(adapt_query(query), params)
                 
-            query += " ORDER BY s.full_name ASC LIMIT 50"
-            cursor.execute(adapt_query(query), params)
-
+                students = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    d['name'] = d.get('full_name', '')
+                    students.append(d)
+                return jsonify({'success': True, 'data': students, 'count': len(students)})
+        else:
+            # === SQLITE FALLBACK: Cross-DB Python Stitching ===
+            # 1. Fetch registered students from users
+            registered_users = {}
+            with db_connection(AUTH_DB_PATH) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id as user_id, email, is_active, is_admin FROM users WHERE role = 'student'")
+                for r in cur.fetchall():
+                    registered_users[r['email'].lower()] = dict(r)
+            
+            # 2. Fetch student records and filter
             students = []
-            for row in cursor.fetchall():
-                d = dict(row)
-                d['name'] = d.get('full_name', '') # Map for frontend
-                students.append(d)
-        return jsonify({'success': True, 'data': students, 'count': len(students)})
+            with db_connection('students') as conn:
+                cur = conn.cursor()
+                query = "SELECT id, email, roll_number, full_name, department, year, phone, created_at, last_login FROM students WHERE 1=1"
+                params = []
+                if dept:
+                    query += " AND department = ?"
+                    params.append(dept)
+                if q:
+                    query += " AND (LOWER(full_name) LIKE ? OR LOWER(roll_number) LIKE ? OR LOWER(email) LIKE ?)"
+                    q_like = f'%{q.lower()}%'
+                    params.extend([q_like, q_like, q_like])
+                query += " ORDER BY full_name ASC"
+                cur.execute(query, params)
+                
+                for row in cur.fetchall():
+                    s_dict = dict(row)
+                    em = s_dict.get('email', '').lower()
+                    if em in registered_users:
+                        u_data = registered_users[em]
+                        s_dict['user_id'] = u_data['user_id']
+                        s_dict['is_active'] = u_data.get('is_active', True)
+                        s_dict['is_admin'] = u_data.get('is_admin', False)
+                        s_dict['name'] = s_dict.get('full_name', '')
+                        students.append(s_dict)
+            
+            return jsonify({'success': True, 'data': students[:50], 'count': len(students[:50])})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/admin/users/faculty', methods=['GET'])
 @require_auth(require_admin=True)
 def admin_list_faculty():
-    """List faculty filtered by department (required) and optional name/employee_id query."""
+    """List all faculty. Native LEFT JOIN for Postgres; Python-stitching for SQLite fallback."""
     dept = (request.args.get('dept', '') or '').strip().upper()
     q = (request.args.get('q', '') or '').strip()
 
     try:
-        with db_connection(AUTH_DB_PATH) as conn:
-            # row_factory handled by db_cursor
-            cursor = conn.cursor()
-
-            query = """
-                SELECT fp.id, fp.name as full_name, fp.employee_id, fp.department,
-                       fp.designation,
-                       u.email, u.id as user_id,
-                       COALESCE(u.is_active, TRUE) as is_active,
-                       COALESCE(u.is_admin, FALSE) as is_admin,
-                       u.created_at
-                FROM faculty_profiles fp
-                JOIN users u ON fp.user_id = u.id
-                WHERE 1=1
-            """
-            params = []
-            if dept:
-                query += " AND fp.department = ?"
-                params.append(dept)
-            if q:
-                query += " AND (LOWER(fp.name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(u.email) LIKE ?)"
-                q_like = f'%{q.lower()}%'
-                params.extend([q_like, q_like, q_like])
+        from core.db_config import is_postgres
+        if is_postgres():
+            with db_connection('faculty_data') as conn:
+                cursor = conn.cursor()
+                query = """
+                    SELECT fp.id, fp.name as full_name, fp.employee_id, fp.department,
+                           fp.designation,
+                           COALESCE(u.email, fp.email) as email,
+                           u.id as user_id,
+                           COALESCE(u.is_active, TRUE) as is_active,
+                           COALESCE(u.is_admin, FALSE) as is_admin,
+                           u.created_at
+                    FROM faculty_profiles fp
+                    LEFT JOIN users u ON fp.email = u.email
+                    WHERE 1=1
+                """
+                params = []
+                if dept:
+                    query += " AND fp.department = ?"
+                    params.append(dept)
+                if q:
+                    query += " AND (LOWER(fp.name) LIKE ? OR LOWER(fp.employee_id) LIKE ? OR LOWER(fp.email) LIKE ?)"
+                    q_like = f'%{q.lower()}%'
+                    params.extend([q_like, q_like, q_like])
+                    
+                query += " ORDER BY fp.name ASC LIMIT 50"
+                cursor.execute(adapt_query(query), params)
                 
-            query += " ORDER BY fp.name ASC LIMIT 50"
-            cursor.execute(adapt_query(query), params)
+                faculty = []
+                for row in cursor.fetchall():
+                    d = dict(row)
+                    d['name'] = d.get('full_name', '')
+                    faculty.append(d)
+                return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
+        else:
+            # === SQLITE FALLBACK ===
+            registered_users = {}
+            with db_connection(AUTH_DB_PATH) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id as user_id, email, is_active, is_admin, created_at FROM users WHERE role = 'faculty' OR role = 'admin'")
+                for r in cur.fetchall():
+                    registered_users[r['email'].lower()] = dict(r)
 
             faculty = []
-            for row in cursor.fetchall():
-                d = dict(row)
-                d['name'] = d.get('full_name', '') # Map for frontend
-                faculty.append(d)
-        return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
+            with db_connection('faculty_data') as conn:
+                cur = conn.cursor()
+                query = "SELECT id, name as full_name, employee_id, department, designation, email FROM faculty_profiles WHERE 1=1"
+                params = []
+                if dept:
+                    query += " AND department = ?"
+                    params.append(dept)
+                if q:
+                    query += " AND (LOWER(name) LIKE ? OR LOWER(employee_id) LIKE ? OR LOWER(email) LIKE ?)"
+                    q_like = f'%{q.lower()}%'
+                    params.extend([q_like, q_like, q_like])
+                query += " ORDER BY name ASC LIMIT 50"
+                cur.execute(query, params)
+
+                for row in cur.fetchall():
+                    f_dict = dict(row)
+                    em = f_dict.get('email', '').lower()
+                    u_data = registered_users.get(em, {})
+                    f_dict['user_id'] = u_data.get('user_id', None)
+                    f_dict['is_active'] = u_data.get('is_active', True)
+                    f_dict['is_admin'] = u_data.get('is_admin', False)
+                    f_dict['created_at'] = u_data.get('created_at', None)
+                    f_dict['name'] = f_dict.get('full_name', '')
+                    if not f_dict.get('email'):
+                        f_dict['email'] = u_data.get('email', '')
+                    faculty.append(f_dict)
+            return jsonify({'success': True, 'data': faculty, 'count': len(faculty)})
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
