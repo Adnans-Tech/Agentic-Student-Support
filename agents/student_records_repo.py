@@ -83,18 +83,27 @@ class StudentRecordsRepository:
 
     def is_available(self) -> bool:
         """Returns True iff the database is available and has a 'students' table."""
-        from core.db_config import is_postgres, adapt_query
+        from core.db_config import is_postgres, get_db_connection
+        conn = None
         try:
-            with get_db_connection('students') as conn:
-                cur = self._get_cursor(conn)
-                if not is_postgres():
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
-                else:
-                    cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'students')")
-                exists = cur.fetchone()[0] if is_postgres() else cur.fetchone() is not None
-                return exists
-        except Exception:
+            conn = get_db_connection('students')
+            cur = conn.cursor()
+            if not is_postgres():
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='students'")
+                exists = cur.fetchone() is not None
+            else:
+                cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'students')")
+                exists = bool(cur.fetchone()[0])
+            return exists
+        except Exception as exc:
+            print(f"[STUDENT_REPO] is_available error: {exc}")
             return False
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Internal connection factory
@@ -105,12 +114,27 @@ class StudentRecordsRepository:
         return get_db_connection('students')
 
     def _get_cursor(self, conn):
-        from core.db_config import get_dict_cursor
-        return get_dict_cursor(conn)
+        """Return a dict-style cursor (sqlite3.Row for SQLite, RealDictCursor for Postgres)."""
+        import sqlite3
+        if isinstance(conn, sqlite3.Connection):
+            conn.row_factory = sqlite3.Row
+            return conn.cursor()
+        else:
+            try:
+                from psycopg2.extras import RealDictCursor
+                return conn.cursor(cursor_factory=RealDictCursor)
+            except Exception:
+                return conn.cursor()
 
     def _rows_to_dicts(self, rows) -> List[Dict]:
         """Ensure rows are plain dicts (handles both backends)."""
         if not rows: return []
+        # Fallback safeguard in case tuples still leak through
+        if isinstance(rows[0], tuple) and not hasattr(rows[0], 'keys'):
+            # It's a plain tuple, no keys available! This means dict() will crash.
+            # We skip dict cast and log an error to prevent silent crash
+            print("[STUDENT_REPO_WARN] Rows are tuples, missing row_factory!")
+            return [{'row': r} for r in rows]
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -126,6 +150,7 @@ class StudentRecordsRepository:
         if not email or "@" not in email:
             return None
         from core.db_config import adapt_query
+        conn = None
         try:
             conn = self._connect()
             cur = self._get_cursor(conn)
@@ -139,13 +164,17 @@ class StudentRecordsRepository:
                 (email.strip(),),
             )
             row = cur.fetchone()
-            conn.close()
-            # Sanitised log — no field values
             print(f"[STUDENT_REPO] find_by_email → match={'yes' if row else 'no'}")
             return dict(row) if row else None
         except Exception as exc:
             print(f"[STUDENT_REPO] find_by_email error: {exc}")
             return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Query: by name (partial / fuzzy)
@@ -161,6 +190,7 @@ class StudentRecordsRepository:
         if not clean:
             return []
         from core.db_config import adapt_query
+        conn = None
         try:
             conn = self._connect()
             cur = self._get_cursor(conn)
@@ -185,13 +215,18 @@ class StudentRecordsRepository:
                     (clean,),
                 )
             rows = cur.fetchall()
-            conn.close()
             result = self._rows_to_dicts(rows)
             print(f"[STUDENT_REPO] find_by_name → count={len(result)}")
             return result
         except Exception as exc:
             print(f"[STUDENT_REPO] find_by_name error: {type(exc).__name__}")
             return []
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Query: presence check (name + year + section)
@@ -203,6 +238,8 @@ class StudentRecordsRepository:
         """
         Returns students matching name AND year AND section.
         Missing year / section means those filters are skipped.
+        Handles the case where 'section' column is empty but info is
+        encoded in 'department' (e.g. 'CSM-B' implies section 'B').
         Returned fields: full_name, roll_number, email, department, year, section
         """
         clean_name = normalise_name(name)
@@ -213,6 +250,7 @@ class StudentRecordsRepository:
         norm_section = normalise_section(section) if section is not None else None
 
         from core.db_config import adapt_query
+        conn = None
         try:
             conn = self._connect()
             cur = self._get_cursor(conn)
@@ -224,8 +262,10 @@ class StudentRecordsRepository:
                 clauses.append("year = ?")
                 params.append(norm_year)
             if norm_section is not None:
-                clauses.append("UPPER(section) = ?")
+                # Match section column OR department suffix (e.g. 'CSM-B' → section 'B')
+                clauses.append("(UPPER(section) = ? OR UPPER(department) LIKE ?)")
                 params.append(norm_section)
+                params.append(f"%-{norm_section}")
 
             query = f"""
                 SELECT full_name, roll_number, email, department, year, section
@@ -236,19 +276,23 @@ class StudentRecordsRepository:
             """
             cur.execute(adapt_query(query), params)
             rows = cur.fetchall()
-            conn.close()
-
             result = self._rows_to_dicts(rows)
+            year_label = str(norm_year) if norm_year else 'any'
+            sec_label = norm_section if norm_section else 'any'
             print(
                 f"[STUDENT_REPO] exists_in_year_section → "
-                f"year={'<int>' if norm_year else 'any'}, "
-                f"section='<str>' if norm_section else 'any', "
-                f"count={len(result)}"
+                f"year={year_label}, section={sec_label}, count={len(result)}"
             )
             return result
         except Exception as exc:
             print(f"[STUDENT_REPO] exists_in_year_section error: {type(exc).__name__}")
             return []
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Query: email for name + year + section (strict)
@@ -281,6 +325,7 @@ class StudentRecordsRepository:
         if not roll_number:
             return None
         from core.db_config import adapt_query
+        conn = None
         try:
             conn = self._connect()
             cur = self._get_cursor(conn)
@@ -294,12 +339,17 @@ class StudentRecordsRepository:
                 (roll_number.strip(),),
             )
             row = cur.fetchone()
-            conn.close()
             print(f"[STUDENT_REPO] find_by_roll → match={'yes' if row else 'no'}")
             return dict(row) if row else None
         except Exception as exc:
             print(f"[STUDENT_REPO] find_by_roll error: {type(exc).__name__}")
             return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Query: list all students in a year/section
@@ -310,6 +360,8 @@ class StudentRecordsRepository:
     ) -> List[Dict]:
         """
         Returns all students in a given year and/or section.
+        Handles the case where section column is empty but encoded in department
+        (e.g. department='CSM-B' implies section 'B').
         Returned fields: full_name, roll_number, email, department, year, section
         """
         norm_year = normalise_year(str(year)) if year is not None else None
@@ -321,11 +373,14 @@ class StudentRecordsRepository:
             clauses.append("year = ?")
             params.append(norm_year)
         if norm_section:
-            clauses.append("UPPER(section) = ?")
+            # Match section column OR department suffix (e.g. 'CSM-B' → section 'B')
+            clauses.append("(UPPER(section) = ? OR UPPER(department) LIKE ?)")
             params.append(norm_section)
+            params.append(f"%-{norm_section}")
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         from core.db_config import adapt_query
+        conn = None
         try:
             conn = self._connect()
             cur = self._get_cursor(conn)
@@ -339,13 +394,18 @@ class StudentRecordsRepository:
                 params,
             )
             rows = cur.fetchall()
-            conn.close()
             result = self._rows_to_dicts(rows)
             print(f"[STUDENT_REPO] list_by_year_section → count={len(result)}")
             return result
         except Exception as exc:
             print(f"[STUDENT_REPO] list_by_year_section error: {type(exc).__name__}")
             return []
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------

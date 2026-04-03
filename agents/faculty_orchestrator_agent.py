@@ -90,7 +90,7 @@ _STUDENT_ID_PATTERNS = [
     r'\b(email|contact).*\bfrom (section|year)\b',
     r'\b(what is|tell me|get).*email.*(from|in|of).*(section|year)\b',
     r'\b(roll number|roll no|enrollment|registered|absent)\b',
-    r'\b\d{2}ag[a-z0-9]+\b',          # roll pattern like 22AG1A66xx
+    r'\b\d{2}[a-z][a-z0-9][a-z0-9][a-z0-9][a-z0-9]+\b',  # roll pattern like 22AG1A66xx or 22ag1a66a9
     r'\b(is\s+\w+\s+present)\b',
     r'\b(student record|student data|student info)\b',
     r'\b(strength|count).*\b(section|class|year)\b',
@@ -297,43 +297,55 @@ def _get_faculty_tickets(faculty_email: str, status_filter: Optional[str] = None
     dept = _get_faculty_department(faculty_email)
     if not dept:
         return []
+    s_conn = None
+    t_conn = None
     try:
-        from core.db_config import adapt_query
-        with get_db_connection('students') as s_conn:
-            sc = s_conn.cursor()
-            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
-            student_emails = [r[0] for r in sc.fetchall()]
+        from core.db_config import adapt_query, get_db_connection, get_dict_cursor
+        s_conn = get_db_connection('students')
+        sc = s_conn.cursor()
+        sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
+        student_emails = [r[0] for r in sc.fetchall()]
+        s_conn.close()
+        s_conn = None
 
         if not student_emails:
             return []
 
-        from core.db_config import get_dict_cursor
-        with get_db_connection('tickets') as t_conn:
-            tc = get_dict_cursor(t_conn)
+        t_conn = get_db_connection('tickets')
+        tc = get_dict_cursor(t_conn)
 
-            placeholders = ",".join(["?"] * len(student_emails))
-            if status_filter:
-                tc.execute(adapt_query(
-                    f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
-                    f"       description, created_at, resolved_by, resolved_at, resolution_note "
-                    f"FROM tickets WHERE student_email IN ({placeholders}) AND status = ? "
-                    f"ORDER BY created_at DESC LIMIT 20"),
-                    student_emails + [status_filter],
-                )
-            else:
-                tc.execute(adapt_query(
-                    f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
-                    f"       description, created_at, resolved_by, resolved_at, resolution_note "
-                    f"FROM tickets WHERE student_email IN ({placeholders}) "
-                    f"ORDER BY created_at DESC LIMIT 20"),
-                    student_emails,
-                )
-            rows = [dict(r) for r in tc.fetchall()]
+        placeholders = ",".join(["?"] * len(student_emails))
+        if status_filter:
+            tc.execute(adapt_query(
+                f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
+                f"       description, created_at, resolved_by, resolved_at, resolution_note "
+                f"FROM tickets WHERE student_email IN ({placeholders}) AND status = ? "
+                f"ORDER BY created_at DESC LIMIT 20"),
+                student_emails + [status_filter],
+            )
+        else:
+            tc.execute(adapt_query(
+                f"SELECT ticket_id, student_email, category, sub_category, status, priority, "
+                f"       description, created_at, resolved_by, resolved_at, resolution_note "
+                f"FROM tickets WHERE student_email IN ({placeholders}) "
+                f"ORDER BY created_at DESC LIMIT 20"),
+                student_emails,
+            )
+        rows = [dict(r) for r in tc.fetchall()]
+        t_conn.close()
+        t_conn = None
         print(f"[FACULTY_ORCH] _get_faculty_tickets → count={len(rows)}")
         return rows
     except Exception as exc:
         print(f"[FACULTY_ORCH] _get_faculty_tickets error: {type(exc).__name__}")
         return []
+    finally:
+        for c in (s_conn, t_conn):
+            if c:
+                try:
+                    c.close()
+                except Exception:
+                    pass
 
 
 def _resolve_ticket_in_db(
@@ -347,42 +359,54 @@ def _resolve_ticket_in_db(
     if not dept:
         return {"success": False, "error": "Could not determine your department. Please check your profile."}
 
+    s_conn = None
+    t_conn = None
     try:
-        from core.db_config import adapt_query
-        with get_db_connection('students') as s_conn:
-            sc = s_conn.cursor()
-            sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
-            student_emails = {r[0] for r in sc.fetchall()}
+        from core.db_config import adapt_query, get_db_connection, get_dict_cursor
+        s_conn = get_db_connection('students')
+        sc = s_conn.cursor()
+        sc.execute(adapt_query("SELECT email FROM students WHERE department = ?"), (dept,))
+        student_emails = {r[0] for r in sc.fetchall()}
+        s_conn.close()
+        s_conn = None
 
-        from core.db_config import get_dict_cursor
-        with get_db_connection('tickets') as t_conn:
-            tc = get_dict_cursor(t_conn)
+        t_conn = get_db_connection('tickets')
+        tc = get_dict_cursor(t_conn)
 
-            tc.execute(adapt_query("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
-            row = tc.fetchone()
+        tc.execute(adapt_query("SELECT id, student_email, status FROM tickets WHERE ticket_id = ?"), (ticket_id,))
+        row = tc.fetchone()
 
-            if not row:
-                return {"success": False, "error": f"Ticket **{ticket_id}** not found."}
+        if not row:
+            return {"success": False, "error": f"Ticket **{ticket_id}** not found."}
 
-            if row["student_email"] not in student_emails:
-                return {"success": False, "error": "You are not authorised to resolve this ticket (department mismatch)."}
+        if row["student_email"] not in student_emails:
+            return {"success": False, "error": "You are not authorised to resolve this ticket (department mismatch)."}
 
-            if row["status"] in ("Resolved", "Closed"):
-                return {"success": False, "error": f"Ticket **{ticket_id}** is already {row['status']}."}
+        if row["status"] in ("Resolved", "Closed"):
+            return {"success": False, "error": f"Ticket **{ticket_id}** is already {row['status']}."}
 
-            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            tc.execute(adapt_query("""
-                UPDATE tickets
-                SET status = 'Resolved', updated_at = ?, resolved_by = ?,
-                    resolved_at = ?, resolution_note = ?
-                WHERE ticket_id = ?
-            """), (now, faculty_email, now, resolution_note.strip(), ticket_id))
-            t_conn.commit()
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        tc.execute(adapt_query("""
+            UPDATE tickets
+            SET status = 'Resolved', updated_at = ?, resolved_by = ?,
+                resolved_at = ?, resolution_note = ?
+            WHERE ticket_id = ?
+        """), (now, faculty_email, now, resolution_note.strip(), ticket_id))
+        t_conn.commit()
+        t_conn.close()
+        t_conn = None
         print(f"[FACULTY_ORCH] Ticket resolved: id={ticket_id}, faculty={faculty_email}")
         return {"success": True, "ticket_id": ticket_id}
     except Exception as exc:
         print(f"[FACULTY_ORCH] _resolve_ticket_in_db error: {type(exc).__name__}")
         return {"success": False, "error": f"Database error: {type(exc).__name__}"}
+    finally:
+        for c in (s_conn, t_conn):
+            if c:
+                try:
+                    c.close()
+                except Exception:
+                    pass
 
 
 # ============================================================================
@@ -606,8 +630,10 @@ class FacultyOrchestratorAgent:
             return self._reply("❌ No student record found for that email address.", "STUDENT_RECORD_QUERY", session_id)
 
         # --- Lookup by roll number ---
-        if roll or re.search(r'\b\d{2}[A-Z]{2}[0-9A-Z]{6,}\b', msg, re.I):
-            target_roll = roll or re.search(r'\b\d{2}[A-Z]{2}[0-9A-Z]{6,}\b', msg, re.I).group()
+        # Regex: 2-digit year prefix + 6+ alphanumeric chars (handles 22AG1A66A9, 22AG1A6665, etc.)
+        _ROLL_RE = re.compile(r'\b\d{2}[A-Za-z0-9]{6,}\b', re.I)
+        if roll or _ROLL_RE.search(msg):
+            target_roll = roll or _ROLL_RE.search(msg).group()
             record = self._repo.find_by_roll(str(target_roll))
             if record:
                 return self._reply(

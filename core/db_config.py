@@ -120,15 +120,16 @@ def get_dict_cursor(conn):
     Get a cursor that returns dict-like rows.
     Works for both Postgres (psycopg2 RealDictCursor) and SQLite (Row factory).
     """
-    if is_postgres():
+    import sqlite3
+    if isinstance(conn, sqlite3.Connection):
+        conn.row_factory = sqlite3.Row
+        return conn.cursor()
+    else:
         try:
             from psycopg2.extras import RealDictCursor
             return conn.cursor(cursor_factory=RealDictCursor)
         except Exception:
             return conn.cursor()
-    else:
-        conn.row_factory = sqlite3.Row
-        return conn.cursor()
 
 
 @contextmanager
