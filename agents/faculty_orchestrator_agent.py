@@ -527,67 +527,78 @@ class FacultyOrchestratorAgent:
         Routes the message and returns a response dict:
           { 'response': str, 'intent': str, 'session_id': str, ... }
         """
-        msg = (message or "").strip()
-        if not msg:
-            return self._reply("Please type a message.", "EMPTY", session_id)
+        try:
+            msg = (message or "").strip()
+            if not msg:
+                return self._reply("Please type a message.", "EMPTY", session_id)
 
-        faculty_profile = faculty_profile or {}
-        faculty_name = faculty_profile.get("full_name") or faculty_profile.get("name") or ""
+            faculty_profile = faculty_profile or {}
+            faculty_name = faculty_profile.get("full_name") or faculty_profile.get("name") or ""
 
-        # --- Check if we are inside an active flow ---
-        flow = _get_flow(session_id)
-        if flow.get("mode") == "email_compose":
-            return self._handle_email_flow(msg, user_id, faculty_name, session_id, flow)
-        if flow.get("mode") == "ticket_resolve":
-            return self._handle_ticket_resolve_flow(msg, user_id, session_id, flow)
+            # --- Check if we are inside an active flow ---
+            flow = _get_flow(session_id)
+            if flow.get("mode") == "email_compose":
+                return self._handle_email_flow(msg, user_id, faculty_name, session_id, flow)
+            if flow.get("mode") == "ticket_resolve":
+                return self._handle_ticket_resolve_flow(msg, user_id, session_id, flow)
 
-        # --- Pre-classify (deterministic) ---
-        intent = _pre_classify(msg)
+            # --- Pre-classify (deterministic) ---
+            intent = _pre_classify(msg)
 
-        # --- LLM classify (fallback) ---
-        slots: Dict[str, Any] = {}
-        if intent is None:
-            result = _llm_classify(msg, self._llm)
-            intent = result.get("intent", "UNKNOWN")
-            slots = result
-        else:
-            # Extract slots via LLM even when pre-router matched (needed for slot values)
-            if intent in ("STUDENT_RECORD_QUERY", "TICKET_RESOLVE", "EMAIL_COMPOSE"):
+            # --- LLM classify (fallback) ---
+            slots: Dict[str, Any] = {}
+            if intent is None:
                 result = _llm_classify(msg, self._llm)
+                intent = result.get("intent", "UNKNOWN")
                 slots = result
+            else:
+                # Extract slots via LLM even when pre-router matched (needed for slot values)
+                if intent in ("STUDENT_RECORD_QUERY", "TICKET_RESOLVE", "EMAIL_COMPOSE"):
+                    result = _llm_classify(msg, self._llm)
+                    slots = result
 
-        # Additional safeguard: If LLM missed the intent but found student slots, assume record query
-        if intent in ("UNKNOWN", "GREETING", None) and _apply_student_id_safeguard(slots):
-            intent = "STUDENT_RECORD_QUERY"
+            # Additional safeguard: If LLM missed the intent but found student slots, assume record query
+            if intent in ("UNKNOWN", "GREETING", None) and _apply_student_id_safeguard(slots):
+                intent = "STUDENT_RECORD_QUERY"
 
-        print(f"[FACULTY_ORCH] intent={intent}, slots={{seen types only}}")
+            print(f"[FACULTY_ORCH] intent={intent}, slots={{seen types only}}")
 
-        # --- Route ---
-        if intent == "STUDENT_RECORD_QUERY":
-            return self._handle_student_record(msg, slots, session_id)
+            # --- Route ---
+            if intent == "STUDENT_RECORD_QUERY":
+                return self._handle_student_record(msg, slots, session_id)
 
-        if intent == "TICKET_VIEW":
-            return self._handle_ticket_view(msg, user_id, session_id, slots)
+            if intent == "TICKET_VIEW":
+                return self._handle_ticket_view(msg, user_id, session_id, slots)
 
-        if intent == "TICKET_RESOLVE":
-            return self._handle_ticket_resolve_start(msg, user_id, session_id, slots)
+            if intent == "TICKET_RESOLVE":
+                return self._handle_ticket_resolve_start(msg, user_id, session_id, slots)
 
-        if intent == "EMAIL_COMPOSE":
-            return self._handle_email_compose_start(msg, user_id, faculty_name, session_id, slots)
+            if intent == "EMAIL_COMPOSE":
+                return self._handle_email_compose_start(msg, user_id, faculty_name, session_id, slots)
 
-        if intent == "EMAIL_HISTORY":
-            return self._handle_email_history(faculty_name, session_id)
+            if intent == "EMAIL_HISTORY":
+                return self._handle_email_history(faculty_name, session_id)
 
-        if intent == "GREETING":
-            return self._reply(GREETING_RESPONSE, "GREETING", session_id)
+            if intent == "GREETING":
+                return self._reply(GREETING_RESPONSE, "GREETING", session_id)
 
-        # UNKNOWN
-        return self._reply(
-            "I'm not sure how to help with that. I can assist with:\n"
-            "• Student record lookups\n• Ticket inbox and resolution\n• Email drafting and history\n\n"
-            "Could you rephrase your question?",
-            "UNKNOWN", session_id,
-        )
+            # UNKNOWN
+            return self._reply(
+                "I'm not sure how to help with that. I can assist with:\n"
+                "• Student record lookups\n• Ticket inbox and resolution\n• Email drafting and history\n\n"
+                "Could you rephrase your question?",
+                "UNKNOWN", session_id,
+            )
+        except Exception as e:
+            print(f"[FACULTY_ORCH-CRITICAL] {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "response": "⚠️ Something went wrong in the ACE Support system. Please try again later.",
+                "intent": "UNKNOWN",
+                "session_id": session_id,
+                "success": False
+            }
 
     # ------------------------------------------------------------------
     # Handler: Student Record Query
@@ -603,27 +614,34 @@ class FacultyOrchestratorAgent:
                 "STUDENT_RECORD_UNAVAILABLE", session_id,
             )
 
+        # Normalise message for case-insensitive matching
+        msg_lower = msg.lower().strip()
+
         # Extract slots
         name: Optional[str] = slots.get("student_name")
         email: Optional[str] = slots.get("student_email")
         roll: Optional[str] = slots.get("roll_number")
         raw_year = slots.get("year")
         raw_sec = slots.get("section")
+        department: Optional[str] = slots.get("department")
         
-        # Aggressive name extraction if slots missed it (e.g. "Who is John Doe")
+        # Aggressive alphanumeric extraction if slots missed it (e.g. "Who is 22AG1A6679")
         if not name and not roll and not email:
-            who_match = re.search(r'\bwho\s+is\s+([a-zA-Z\s]{3,})\b', msg_lower)
-            if who_match:
-                name = who_match.group(1).strip()
+            # Handle "Who is [Roll or Name]"
+            match = re.search(r'\bwho\s+is\s+([a-zA-Z0-9\s]{3,})\b', msg_lower)
+            if match:
+                potential = match.group(1).strip()
+                # If it looks like a roll number (mostly digits/caps), treat it as such
+                if re.match(r'^\d{2}[A-Z0-9]+$', potential.upper()):
+                    roll = potential
+                else:
+                    name = potential
 
         year: Optional[int] = normalise_year(str(raw_year)) if raw_year is not None else None
         section: Optional[str] = normalise_section(str(raw_sec)) if raw_sec is not None else None
 
-        # Sub-intent detection from message text
-        msg_lower = msg.lower()
-
         # --- Lookup by email ---
-        if email or re.search(r'\b\w+@\w+\.\w+\b', msg_lower):
+        if email or re.search(r'\b[\w.+-]+@[\w.+-]+\.[a-z]{2,}\b', msg_lower):
             target_email = email or re.search(r'\b[\w.+-]+@[\w.+-]+\.[a-z]{2,}\b', msg_lower, re.I)
             if hasattr(target_email, 'group'):
                 target_email = target_email.group()
@@ -636,12 +654,11 @@ class FacultyOrchestratorAgent:
             return self._reply("❌ No student record found for that email address.", "STUDENT_RECORD_QUERY", session_id)
 
         # --- Lookup by roll number ---
-        # Regex: 2-digit year prefix + 6+ alphanumeric chars (handles 22AG1A66A9, 22AG1A6665, etc.)
+        # Regex: 2-digit year prefix + 6+ alphanumeric chars
         _ROLL_RE = re.compile(r'\b\d{2}[A-Za-z0-9]{6,}\b', re.I)
         if roll or _ROLL_RE.search(msg):
             target_roll = str(roll or _ROLL_RE.search(msg).group()).strip()
             
-            # Additional diagnostic logging for Vercel troubleshooting
             from core.db_config import is_postgres
             backend = "PostgreSQL" if is_postgres() else "SQLite"
             print(f"[FACULTY_ORCH] Searching {backend} for roll: {target_roll}")
@@ -653,16 +670,14 @@ class FacultyOrchestratorAgent:
                     "STUDENT_RECORD_QUERY", session_id,
                 )
             
-            # Enhanced error message to show what was searched
             return self._reply(
                 f"❌ No student record found for roll number **{target_roll}** in the **{backend}** database.\n\n"
-                "If this record exists in our local system, please ensure it has been synced to the production database.", 
+                "Please verify the roll number or check if the record has been imported.", 
                 "STUDENT_RECORD_QUERY", session_id
             )
 
         # --- Email address lookup (name + year + section) ---
         if name and (re.search(r'\bemail\b', msg_lower) or re.search(r'\bcontact\b', msg_lower)):
-            # If name is provided but year/section are missing, search by name first to see if it's unique
             matches = self._repo.find_by_name(name)
             if len(matches) == 1:
                 return self._reply(
@@ -677,12 +692,9 @@ class FacultyOrchestratorAgent:
                 )
 
             if year is None or section is None:
-                # Ask for missing slots
                 missing = []
-                if year is None:
-                    missing.append("**year**")
-                if section is None:
-                    missing.append("**section**")
+                if year is None: missing.append("**year**")
+                if section is None: missing.append("**section**")
                 return self._reply(
                     f"To look up the email for **{name}**, could you provide the {' and '.join(missing)}?",
                     "STUDENT_RECORD_QUERY", session_id,
@@ -690,11 +702,9 @@ class FacultyOrchestratorAgent:
             record = self._repo.get_email_for_name_year_section(name, year, section or "")
             if record:
                 return self._reply(
-                    f"✅ Details for **{name}**:\n\n"
-                    f"{format_student_card(record)}",
+                    f"✅ Details for **{name}**:\n\n{format_student_card(record)}",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
-            # Check if multiple matches exist
             matches = self._repo.exists_in_year_section(name, year, section)
             if len(matches) > 1:
                 return self._reply(
@@ -707,14 +717,31 @@ class FacultyOrchestratorAgent:
                 "STUDENT_RECORD_QUERY", session_id,
             )
 
-        # --- General Name Search / Similar Names ---
+        # --- Department / All Records Listing ---
+        if any(w in msg_lower for w in ["all", "list", "records", "everything"]):
+            # Extract department from message if not in slots
+            if not department:
+                dept_match = re.search(r'\b(csm|cse|csd|it|ece|eee|mech|civil)\b', msg_lower)
+                if dept_match:
+                    department = dept_match.group(1).upper()
+            
+            students = self._repo.list_by_year_section(year, section, department)
+            if students:
+                results_text = f"Found **{len(students)}** student record(s)"
+                if department: results_text += f" in **{department}**"
+                if year: results_text += f", Year {year}"
+                if section: results_text += f", Section {section}"
+                
+                return self._reply(
+                    f"✅ {results_text}:\n\n{format_student_list(students, show_email=True)}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
+
+        # --- General Name Search ---
         if name:
             matches = self._repo.find_by_name(name)
-            if not matches:
-                # One last try: if name was "John Doe", maybe search "John"
-                parts = name.split()
-                if len(parts) > 1:
-                    matches = self._repo.find_by_name(parts[0])
+            if not matches and len(name.split()) > 1:
+                matches = self._repo.find_by_name(name.split()[0])
             
             if len(matches) == 1:
                 return self._reply(
@@ -723,75 +750,28 @@ class FacultyOrchestratorAgent:
                 )
             elif len(matches) > 1:
                 return self._reply(
-                    f"I found {len(matches)} students with similar names matching **{name}**:\n\n"
+                    f"I found {len(matches)} students matching **{name}**:\n\n"
                     f"{format_student_list(matches, show_email=True)}",
                     "STUDENT_RECORD_QUERY", session_id,
                 )
             else:
                 return self._reply(f"❌ No student record found matching **{name}**.", "STUDENT_RECORD_QUERY", session_id)
 
-        # --- Presence check (name + year + section) ---
-        if name and (
-            re.search(r'\bpresent\b', msg_lower) or
-            re.search(r'\benrolled\b', msg_lower) or
-            re.search(r'\battending\b', msg_lower) or
-            re.search(r'\bin section\b', msg_lower)
-        ):
-            matches = self._repo.exists_in_year_section(name, year, section)
-            if len(matches) == 1:
-                s = matches[0]
-                return self._reply(
-                    f"✅ Yes, **{s['full_name']}** is present in Year {year}, Section {section}.\n\n"
-                    f"{format_student_card(s)}",
-                    "STUDENT_RECORD_QUERY", session_id,
-                )
-            if len(matches) > 1:
-                return self._reply(
-                    f"Multiple students named **{name}** are present in Year {year}, Section {section}:\n\n"
-                    f"{format_student_list(matches, show_email=False)}",
-                    "STUDENT_RECORD_QUERY", session_id,
-                )
-            return self._reply(
-                f"❌ No student named **{name}** found in Year {year}, Section {section}.",
-                "STUDENT_RECORD_QUERY", session_id,
-            )
-
-        # --- List all students by name (partial match) ---
-        if name:
-            matches = self._repo.find_by_name(name, partial=True)
-            if not matches:
-                return self._reply(f"❌ No students found with the name **{name}**.", "STUDENT_RECORD_QUERY", session_id)
-            if len(matches) == 1:
-                return self._reply(
-                    f"✅ Found 1 student:\n\n{format_student_card(matches[0])}",
-                    "STUDENT_RECORD_QUERY", session_id,
-                )
-            return self._reply(
-                f"Found **{len(matches)}** student(s) matching **{name}**:\n\n"
-                f"{format_student_list(matches, show_email=False)}\n\n"
-                "Would you like the email address or more details for any of these?",
-                "STUDENT_RECORD_QUERY", session_id,
-            )
-
-        # --- List all students in a section/year ---
+        # Placeholder fallback
         if year is not None or section is not None:
-            students = self._repo.list_by_year_section(year, section)
-            if not students:
-                label = f"Year {year}" if year else ""
-                label += f"{', ' if label else ''}Section {section}" if section else ""
-                return self._reply(f"❌ No students found for {label}.", "STUDENT_RECORD_QUERY", session_id)
-            return self._reply(
-                f"Found **{len(students)}** student(s):\n\n{format_student_list(students, show_email=False)}",
-                "STUDENT_RECORD_QUERY", session_id,
-            )
+            students = self._repo.list_by_year_section(year, section, department)
+            if students:
+                return self._reply(
+                    f"✅ Found **{len(students)}** student(s):\n\n{format_student_list(students, show_email=True)}",
+                    "STUDENT_RECORD_QUERY", session_id,
+                )
 
-        # Not enough info
+        # Final instruction
         return self._reply(
             "I can help you look up student records. Please provide one of:\n"
-            "• A student name (e.g., 'list students named Arjun')\n"
-            "• A student email address\n"
-            "• A roll number\n"
-            "• Year and section (e.g., 'students in year 3 section A')",
+            "• A student name or roll number (e.g., 'Who is 22AG1A6679')\n"
+            "• A listing request (e.g., 'list all students in CSM-B')\n"
+            "• A specific search (e.g., 'email for John in Year 3')",
             "STUDENT_RECORD_QUERY", session_id,
         )
 
@@ -1481,23 +1461,6 @@ class FacultyOrchestratorAgent:
     # ------------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------------
-
-    def _reply(self, text: str, intent: str, session_id: str) -> Dict[str, Any]:
-        return {
-            "response": text,
-            "intent": intent,
-            "session_id": session_id,
-            "success": True,
-        }
-
-
-# ============================================================================
-# Singleton factory
-# ============================================================================
-
-_faculty_orch_instance: Optional[FacultyOrchestratorAgent] = None
-
-
     def _extract_email_slots_with_llm(self, text: str) -> Dict[str, Any]:
         """
         Uses LLM to extract email-related slots from a user query.
@@ -1538,9 +1501,26 @@ _faculty_orch_instance: Optional[FacultyOrchestratorAgent] = None
             print(f"[FACULTY_ORCH] LLM Slot extraction failed: {e}")
             return {}
 
+    def _reply(self, text: str, intent: str, session_id: str) -> Dict[str, Any]:
+        return {
+            "response": text,
+            "intent": intent,
+            "session_id": session_id,
+            "success": True,
+        }
+
+# ============================================================================
+# Singleton factory
+# ============================================================================
+
+_faculty_orch_instance: Optional[FacultyOrchestratorAgent] = None
 
 def get_faculty_orchestrator() -> FacultyOrchestratorAgent:
     global _faculty_orch_instance
     if _faculty_orch_instance is None:
         _faculty_orch_instance = FacultyOrchestratorAgent()
     return _faculty_orch_instance
+
+if __name__ == "__main__":
+    fo = get_faculty_orchestrator()
+    print(fo.process_message("Email Anurag about the event", "test@faculty.com", "session-123"))

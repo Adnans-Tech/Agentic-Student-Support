@@ -361,16 +361,17 @@ class StudentRecordsRepository:
     # ------------------------------------------------------------------
 
     def list_by_year_section(
-        self, year: Optional[int] = None, section: Optional[str] = None
+        self, year: Optional[int] = None, section: Optional[str] = None, department: Optional[str] = None
     ) -> List[Dict]:
         """
-        Returns all students in a given year and/or section.
+        Returns students in a given year, section, and/or department.
         Handles the case where section column is empty but encoded in department
         (e.g. department='CSM-B' implies section 'B').
         Returned fields: full_name, roll_number, email, department, year, section
         """
         norm_year = normalise_year(str(year)) if year is not None else None
         norm_section = normalise_section(section) if section is not None else None
+        norm_dept = department.strip().upper() if department else None
 
         clauses = []
         params = []
@@ -382,6 +383,9 @@ class StudentRecordsRepository:
             clauses.append("(UPPER(section) = ? OR UPPER(department) LIKE ?)")
             params.append(norm_section)
             params.append(f"%-{norm_section}")
+        if norm_dept:
+            clauses.append("UPPER(department) = ?")
+            params.append(norm_dept)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         from core.db_config import adapt_query
@@ -394,13 +398,13 @@ class StudentRecordsRepository:
                 SELECT full_name, roll_number, email, department, year, section
                 FROM students {where}
                 ORDER BY full_name
-                LIMIT 50
+                LIMIT 100
                 """),
                 params,
             )
             rows = cur.fetchall()
             result = self._rows_to_dicts(rows)
-            print(f"[STUDENT_REPO] list_by_year_section → count={len(result)}")
+            print(f"[STUDENT_REPO] list_by_year_section → year={norm_year}, sec={norm_section}, dept={norm_dept}, count={len(result)}")
             return result
         except Exception as exc:
             print(f"[STUDENT_REPO] list_by_year_section error: {type(exc).__name__}")

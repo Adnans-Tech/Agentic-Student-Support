@@ -381,15 +381,16 @@ Return ONLY valid JSON:
                     entities["email_address"] = None
 
             # --- Phase 1: Try LLM-assisted extraction if slots are thin ---
-        if not slots.get("recipient_email") or not slots.get("recipient_name") or not slots.get("purpose"):
-            ext = self._extract_email_slots_with_llm(message)
-            if ext:
-                if not slots.get("recipient_email"): slots["recipient_email"] = ext.get("recipient_email")
-                if not slots.get("recipient_name"): slots["recipient_name"] = ext.get("recipient_name")
-                if not slots.get("purpose"): slots["purpose"] = ext.get("purpose")
-                if ext.get("tone"): slots["tone"] = ext.get("tone")
+            # Use 'entities' as 'slots' is not defined in this scope
+            if not entities.get("email_address") or not entities.get("faculty_name") or not entities.get("purpose"):
+                ext = self._extract_email_slots_with_llm(message)
+                if ext:
+                    if not entities.get("email_address"): entities["email_address"] = ext.get("recipient_email")
+                    if not entities.get("faculty_name"): entities["faculty_name"] = ext.get("recipient_name")
+                    if not entities.get("purpose"): entities["purpose"] = ext.get("purpose")
+                    if ext.get("tone"): entities["tone"] = ext.get("tone")
 
-        # Extract email from message if LLM missed it or we just cleared it
+            # Extract email from message if LLM missed it or we just cleared it
             email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', message)
             if email_match and not entities.get("email_address"):
                 entities["email_address"] = email_match.group()
@@ -399,6 +400,8 @@ Return ONLY valid JSON:
                     "entities": entities, "reasoning": result.get("reasoning", "")}
         except Exception as e:
             print(f"[INTENT] Classification error: {e}")
+            import traceback
+            traceback.print_exc()
             return {"intent": "UNKNOWN", "confidence": 0.0,
                     "entities": {}, "reasoning": str(e)}
 
@@ -408,119 +411,133 @@ Return ONLY valid JSON:
     def process_message(self, user_message: str, user_id: str, session_id: str,
                         mode: str = "auto", student_profile: Optional[Dict] = None,
                         _reroute_depth: int = 0) -> Dict:
-        print(f"[ORCHESTRATOR] '{user_message[:80]}' (user={user_id})")
+        """
+        Main entry point for orchestration.
+        """
+        try:
+            print(f"[ORCHESTRATOR] '{user_message[:80]}' (user={user_id})")
 
-        # --- Recursion guard: prevent infinite reroute loops ---
-        if _reroute_depth > 1:
-            print("[GUARD] Max reroute depth reached — returning clarification")
+            # --- Recursion guard: prevent infinite reroute loops ---
+            if _reroute_depth > 1:
+                print("[GUARD] Max reroute depth reached — returning clarification")
+                return self._make_response(
+                    "I'm having trouble understanding. Could you rephrase?",
+                    response_type="clarification_request",
+                    session_id=session_id, user_id=user_id,
+                    user_message=user_message, intent="UNKNOWN",
+                    student_profile=student_profile)
+
+            update_session_activity(session_id)
+            if check_session_timeout(session_id):
+                print("[SESSION] Timed out")
+
+            msg_lower = user_message.lower().strip()
+
+            # --- Load active flow ---
+            state = resume_flow(session_id, "active") or {}
+            active_flow = state.get("active_flow")
+
+            # --- Cancel/exit check ---
+            if msg_lower in CANCEL_KEYWORDS and active_flow:
+                clear_flow(session_id, "active")
+                return self._make_response(
+                    "Cancelled. How can I help you?",
+                    session_id=session_id, user_id=user_id,
+                    user_message=user_message, intent="GREETING",
+                    student_profile=student_profile)
+
+            # --- Flow TTL: auto-clear stale flows ---
+            if active_flow:
+                flow_last_updated = state.get("last_updated", 0)
+                flow_age = time.time() - flow_last_updated if flow_last_updated else float('inf')
+                if flow_age > FLOW_STALE_TTL:
+                    print(f"[FLOW] Stale flow '{active_flow}' (age={flow_age:.0f}s) — auto-clearing")
+                    clear_flow(session_id, "active")
+                    active_flow = None
+                    state = {}
+
+            # --- Centralized escape: if active flow, pre-check intent before trapping ---
+            if active_flow:
+                pre_intent = self._pre_classify_intent(user_message)
+                # Map active flow names to their intent
+                flow_intent_map = {"email": "EMAIL", "ticket": "TICKET", "calendar": "CALENDAR"}
+                flow_intent = flow_intent_map.get(active_flow)
+
+                if pre_intent and pre_intent != flow_intent:
+                    print(f"[ESCAPE] Active flow '{active_flow}' but pre-router says '{pre_intent}' — rerouting")
+                    clear_flow(session_id, "active")
+                    active_flow = None
+                    state = {}
+                    # Route directly to the matched handler instead of recursion
+                    return self._route_to_handler(
+                        pre_intent, 1.0, {}, user_message, user_id, session_id,
+                        student_profile, _reroute_depth + 1)
+
+            # --- Active flow -> route to handler ---
+            if active_flow:
+                print(f"[FLOW] Active: {active_flow}, step: {state.get('step')}")
+                if active_flow == "email":
+                    return self._handle_email_flow(
+                        user_message, user_id, session_id, student_profile,
+                        state.get("entities", {}), state)
+                elif active_flow == "ticket":
+                    return self._handle_ticket_flow(
+                        user_message, user_id, session_id, student_profile,
+                        state.get("entities", {}), state)
+                else:
+                    clear_flow(session_id, "active")
+
+            # --- Step 1: Try deterministic pre-router (no LLM cost) ---
+            pre_intent = self._pre_classify_intent(user_message)
+            if pre_intent:
+                print(f"[ROUTE] Pre-router matched: {pre_intent} (no LLM call)")
+                return self._route_to_handler(
+                    pre_intent, 1.0, {}, user_message, user_id, session_id,
+                    student_profile, _reroute_depth)
+
+            # --- Step 2: LLM classification (fallback) ---
+            history_text = self._get_history_text(session_id, user_id)
+            cls = self._classify_intent(user_message, history_text)
+            intent = cls["intent"]
+            confidence = cls["confidence"]
+            entities = cls["entities"]
+            threshold = CONFIDENCE_THRESHOLDS.get(intent, 0.5)
+
+            # --- Confidence check with entity fallback ---
+            if confidence < threshold:
+                has_entities = any(v for v in entities.values() if v)
+                if has_entities and intent in ("EMAIL", "TICKET"):
+                    print(f"[INTENT] Low conf ({confidence:.2f}<{threshold}) but entities present — proceeding")
+                else:
+                    print(f"[INTENT] Low conf ({confidence:.2f}<{threshold}) — clarifying")
+                    return self._make_response(
+                        "Could you please clarify what you'd like help with?\n\n"
+                        "• **Ask about college policies/fees**\n"
+                        "• **Send an email** to faculty or contacts\n"
+                        "• **View sent emails** or email history\n"
+                        "• **Raise a ticket** for issues\n"
+                        "• **Check ticket status** or view tickets\n"
+                        "• **Add calendar event** or mark dates\n"
+                        "• **My profile summary**",
+                        response_type="clarification_request",
+                        session_id=session_id, user_id=user_id,
+                        user_message=user_message, intent=intent,
+                        confidence=confidence, student_profile=student_profile)
+
+            # --- Route ---
+            return self._route_to_handler(
+                intent, confidence, entities, user_message, user_id, session_id,
+                student_profile, _reroute_depth)
+        except Exception as e:
+            print(f"[ORCHESTRATOR-CRITICAL] {e}")
+            import traceback
+            traceback.print_exc()
             return self._make_response(
-                "I'm having trouble understanding. Could you rephrase?",
-                response_type="clarification_request",
+                "⚠️ Something went wrong in the ACE Support system. Please try again later.",
+                response_type="error",
                 session_id=session_id, user_id=user_id,
                 user_message=user_message, intent="UNKNOWN",
                 student_profile=student_profile)
-
-        update_session_activity(session_id)
-        if check_session_timeout(session_id):
-            print("[SESSION] Timed out")
-
-        msg_lower = user_message.lower().strip()
-
-        # --- Load active flow ---
-        state = resume_flow(session_id, "active") or {}
-        active_flow = state.get("active_flow")
-
-        # --- Cancel/exit check ---
-        if msg_lower in CANCEL_KEYWORDS and active_flow:
-            clear_flow(session_id, "active")
-            return self._make_response(
-                "Cancelled. How can I help you?",
-                session_id=session_id, user_id=user_id,
-                user_message=user_message, intent="GREETING",
-                student_profile=student_profile)
-
-        # --- Flow TTL: auto-clear stale flows ---
-        if active_flow:
-            flow_last_updated = state.get("last_updated", 0)
-            flow_age = time.time() - flow_last_updated if flow_last_updated else float('inf')
-            if flow_age > FLOW_STALE_TTL:
-                print(f"[FLOW] Stale flow '{active_flow}' (age={flow_age:.0f}s) — auto-clearing")
-                clear_flow(session_id, "active")
-                active_flow = None
-                state = {}
-
-        # --- Centralized escape: if active flow, pre-check intent before trapping ---
-        if active_flow:
-            pre_intent = self._pre_classify_intent(user_message)
-            # Map active flow names to their intent
-            flow_intent_map = {"email": "EMAIL", "ticket": "TICKET", "calendar": "CALENDAR"}
-            flow_intent = flow_intent_map.get(active_flow)
-
-            if pre_intent and pre_intent != flow_intent:
-                print(f"[ESCAPE] Active flow '{active_flow}' but pre-router says '{pre_intent}' — rerouting")
-                clear_flow(session_id, "active")
-                active_flow = None
-                state = {}
-                # Route directly to the matched handler instead of recursion
-                return self._route_to_handler(
-                    pre_intent, 1.0, {}, user_message, user_id, session_id,
-                    student_profile, _reroute_depth + 1)
-
-        # --- Active flow -> route to handler ---
-        if active_flow:
-            print(f"[FLOW] Active: {active_flow}, step: {state.get('step')}")
-            if active_flow == "email":
-                return self._handle_email_flow(
-                    user_message, user_id, session_id, student_profile,
-                    state.get("entities", {}), state)
-            elif active_flow == "ticket":
-                return self._handle_ticket_flow(
-                    user_message, user_id, session_id, student_profile,
-                    state.get("entities", {}), state)
-            else:
-                clear_flow(session_id, "active")
-
-        # --- Step 1: Try deterministic pre-router (no LLM cost) ---
-        pre_intent = self._pre_classify_intent(user_message)
-        if pre_intent:
-            print(f"[ROUTE] Pre-router matched: {pre_intent} (no LLM call)")
-            return self._route_to_handler(
-                pre_intent, 1.0, {}, user_message, user_id, session_id,
-                student_profile, _reroute_depth)
-
-        # --- Step 2: LLM classification (fallback) ---
-        history_text = self._get_history_text(session_id, user_id)
-        cls = self._classify_intent(user_message, history_text)
-        intent = cls["intent"]
-        confidence = cls["confidence"]
-        entities = cls["entities"]
-        threshold = CONFIDENCE_THRESHOLDS.get(intent, 0.5)
-
-        # --- Confidence check with entity fallback ---
-        if confidence < threshold:
-            has_entities = any(v for v in entities.values() if v)
-            if has_entities and intent in ("EMAIL", "TICKET"):
-                print(f"[INTENT] Low conf ({confidence:.2f}<{threshold}) but entities present — proceeding")
-            else:
-                print(f"[INTENT] Low conf ({confidence:.2f}<{threshold}) — clarifying")
-                return self._make_response(
-                    "Could you please clarify what you'd like help with?\n\n"
-                    "• **Ask about college policies/fees**\n"
-                    "• **Send an email** to faculty or contacts\n"
-                    "• **View sent emails** or email history\n"
-                    "• **Raise a ticket** for issues\n"
-                    "• **Check ticket status** or view tickets\n"
-                    "• **Add calendar event** or mark dates\n"
-                    "• **My profile summary**",
-                    response_type="clarification_request",
-                    session_id=session_id, user_id=user_id,
-                    user_message=user_message, intent=intent,
-                    confidence=confidence, student_profile=student_profile)
-
-        # --- Route ---
-        return self._route_to_handler(
-            intent, confidence, entities, user_message, user_id, session_id,
-            student_profile, _reroute_depth)
 
     def _route_to_handler(self, intent, confidence, entities, user_message,
                           user_id, session_id, student_profile, _reroute_depth=0):
@@ -1806,14 +1823,15 @@ Return ONLY valid JSON (no markdown):
             else:
                 return {"success": False, "message": f"Unknown action: {action_type}", "error": f"Unknown action: {action_type}"}
         except Exception as e:
-            print(f"[ERROR] Action execution: {e}")
-            return {"success": False, "message": f"Error: {str(e)}", "error": str(e)}
-
-
-# =============================================================================
-# SINGLETON
-# =============================================================================
-_orchestrator_instance = None
+            print(f"[ORCHESTRATOR-CRITICAL] {e}")
+            import traceback
+            traceback.print_exc()
+            return self._make_response(
+                "⚠️ Something went wrong in the ACE Support system. Please try again later.",
+                response_type="error",
+                session_id=session_id, user_id=user_id,
+                user_message=user_message, intent="UNKNOWN",
+                student_profile=student_profile)
 
     def _extract_email_slots_with_llm(self, text: str):
         """
@@ -1846,6 +1864,7 @@ _orchestrator_instance = None
         except Exception as e:
             print(f"[STUDENT_ORCH] LLM Slot extraction failed: {e}")
             return {}
+
 
 
 def get_orchestrator() -> OrchestratorAgent:
