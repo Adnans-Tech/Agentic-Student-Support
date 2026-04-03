@@ -380,7 +380,16 @@ Return ONLY valid JSON:
                         entities["faculty_name"] = extracted_email
                     entities["email_address"] = None
 
-            # Extract email from message if LLM missed it or we just cleared it
+            # --- Phase 1: Try LLM-assisted extraction if slots are thin ---
+        if not slots.get("recipient_email") or not slots.get("recipient_name") or not slots.get("purpose"):
+            ext = self._extract_email_slots_with_llm(message)
+            if ext:
+                if not slots.get("recipient_email"): slots["recipient_email"] = ext.get("recipient_email")
+                if not slots.get("recipient_name"): slots["recipient_name"] = ext.get("recipient_name")
+                if not slots.get("purpose"): slots["purpose"] = ext.get("purpose")
+                if ext.get("tone"): slots["tone"] = ext.get("tone")
+
+        # Extract email from message if LLM missed it or we just cleared it
             email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', message)
             if email_match and not entities.get("email_address"):
                 entities["email_address"] = email_match.group()
@@ -1059,6 +1068,15 @@ Return ONLY valid JSON:
         if slots.get("recipient_email") and not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', str(slots["recipient_email"]).strip()):
             slots.pop("recipient_email")
 
+        # --- Phase 1: Try LLM-assisted extraction if slots are thin ---
+        if not slots.get("recipient_email") or not slots.get("recipient_name") or not slots.get("purpose"):
+            ext = self._extract_email_slots_with_llm(message)
+            if ext:
+                if not slots.get("recipient_email"): slots["recipient_email"] = ext.get("recipient_email")
+                if not slots.get("recipient_name"): slots["recipient_name"] = ext.get("recipient_name")
+                if not slots.get("purpose"): slots["purpose"] = ext.get("purpose")
+                if ext.get("tone"): slots["tone"] = ext.get("tone")
+
         # Extract email from message
         email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', message)
         if email_match and not slots.get("recipient_email"):
@@ -1322,7 +1340,9 @@ Return ONLY valid JSON:
                                 student_profile, slots, entities):
         purpose = slots.get("purpose", message)
         # Identify the best candidate for recipient name
-        recipient_name = slots.get("recipient_name")
+        # Resolve recipient's actual name for personalization
+        # Priority: 1. Explicitly extracted hint, 2. faculty_name entity, 3. "Faculty Member"
+        recipient_name = slots.get("recipient_name") or slots.get("recipient_name_hint")
         if not recipient_name or "@" in str(recipient_name):
              # Try faculty_name if recipient_name is missing or an email
              recipient_name = slots.get("faculty_name")
@@ -1794,6 +1814,39 @@ Return ONLY valid JSON (no markdown):
 # SINGLETON
 # =============================================================================
 _orchestrator_instance = None
+
+    def _extract_email_slots_with_llm(self, text: str):
+        """
+        Uses LLM to extract email-related slots from a user query.
+        Returns a dict with: recipient_name, recipient_email, purpose, tone
+        """
+        if not self.llm:
+            return {}
+        try:
+            prompt = (
+                "You are an expert NLU engine for a college support system.\n"
+                "Extract the following slots from the user's email request:\n"
+                "- recipient_name: The name of the person being emailed (e.g., 'Anurag')\n"
+                "- recipient_email: The email address (e.g., 'test@gmail.com')\n"
+                "- purpose: The core reason for the email (e.g., 'meeting about event preparations')\n"
+                "- tone: The requested tone (formal, semi-formal, friendly, urgent, strict)\n\n"
+                f"User Message: \"{text}\"\n\n"
+                "Return ONLY a JSON object. If a slot is not found, use null.\n"
+                "Example: {\"recipient_name\": \"Anurag\", \"recipient_email\": \"anurag@gmail.com\", \"purpose\": \"discuss event prep\", \"tone\": \"semi-formal\"}"
+            )
+            resp = self.llm.invoke(prompt)
+            content_resp = resp.content.strip()
+            # Clean JSON
+            if "```" in content_resp:
+                content_resp = content_resp.split("```")[1]
+                if content_resp.startswith("json"):
+                    content_resp = content_resp[4:].strip()
+            import json
+            return json.loads(content_resp)
+        except Exception as e:
+            print(f"[STUDENT_ORCH] LLM Slot extraction failed: {e}")
+            return {}
+
 
 def get_orchestrator() -> OrchestratorAgent:
     global _orchestrator_instance

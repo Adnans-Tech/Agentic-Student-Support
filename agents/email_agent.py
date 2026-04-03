@@ -169,11 +169,11 @@ Generate ONLY the subject line, nothing else."""
                 "strict": "Use firm, authoritative language. Be direct and unambiguous. The email should sound commanding but still professional — NOT rude, but clearly leaving no room for negotiation or delay."
             }
             
-            # Length guidance - STRICT enforcement
+            # Length guidance - Professional & Detailed
             length_guidance = {
-                "short": "EXACTLY 3-4 short sentences. Be extremely concise. NO explanations, NO extra details.",
-                "medium": "EXACTLY 5-7 sentences. Provide sufficient context but remain brief.",
-                "detailed": "EXACTLY 10-12 sentences. Include thorough details and explanations."
+                "short": "At least 3-4 professional sentences. Be concise but clear.",
+                "medium": "At least 5-7 professional sentences (roughly 4-6 lines). Provide sufficient context and detail.",
+                "detailed": "At least 10-12 professional sentences. Include thorough explanations and next steps."
             }
             
             # Image reference instruction
@@ -181,7 +181,7 @@ Generate ONLY the subject line, nothing else."""
             if image_count > 0:
                 image_instruction = f"\n- Include ONE brief sentence referencing the {image_count} attached image(s)."
             
-            temperature = 0.4 if regenerate else 0.2
+            temperature = 0.5 if regenerate else 0.4
 
             # Build voice rules based on sender role
             if is_faculty:
@@ -193,10 +193,10 @@ Generate ONLY the subject line, nothing else."""
                     "   - Maintain authority appropriate for a teacher/professor"
                 )
                 system_msg = (
-                    f"You are a strict email writer. You MUST preserve the user's exact purpose. "
+                    f"You are a professional university faculty member. You MUST preserve the user's exact purpose. "
                     f"You MUST write as a FACULTY MEMBER using 'I'. "
-                    f"You MUST match the requested {length} length exactly and the '{tone}' tone exactly. "
-                    f"NEVER add creativity or expand beyond what's requested."
+                    f"Write a polished, professional email of {length} length with an appropriate '{tone}' tone. "
+                    f"Expand on the provided purpose with professional phrasing while staying strictly grounded in the facts."
                 )
             else:
                 voice_rules = (
@@ -206,10 +206,10 @@ Generate ONLY the subject line, nothing else."""
                     "   - The sender is an INDIVIDUAL STUDENT, NOT an institution"
                 )
                 system_msg = (
-                    f"You are a strict email writer. You MUST preserve the user's exact purpose. "
-                    f"You MUST write as an individual using 'I', never as an institution. "
-                    f"You MUST match the requested {length} length exactly. "
-                    f"NEVER add creativity or expand beyond what's requested."
+                    f"You are a professional student assistant. You MUST preserve the user's exact purpose. "
+                    f"You MUST write using 'I', never as an institution. "
+                    f"Write a polished, professional email of {length} length. "
+                    f"Expand on the provided purpose with professional phrasing while staying strictly grounded in the facts."
                 )
             
             prompt = f"""Generate a professional email body for this EXACT purpose:
@@ -226,10 +226,11 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
 
 1. PURPOSE PRESERVATION (ABSOLUTE PRIORITY):
    - Write ONLY about the stated purpose: "{purpose}"
-   - DO NOT invent details. EXTRACT and USE ONLY details provided in the purpose.
+   - Use the provided details to construct a professional narrative. 
+   - Ensure the email explains the context clearly—do not just state the purpose in one line.
    - If the purpose mentions specific Dates, Times, Locations, or Items, you MUST include them.
-   - NEVER add information not present in the purpose (e.g., do not add interview rooms, times, or resume reminders unless they were specifically mentioned).
-   - If the purpose is a STATEMENT, confirm or act on it; do NOT transform it into a vague question.
+   - NEVER add hallucinated details (like room numbers or documents) that weren't in the purpose.
+   - If the purpose is a STATEMENT, treat it as a confirmed fact or action.
 
 {voice_rules}
 
@@ -238,9 +239,10 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
    - DO NOT add pleasantries like "I hope this email finds you well" unless the purpose includes it.
    - Use the specific details from the purpose to make the email sound grounded and authentic.
 
-4. LENGTH ENFORCEMENT:
+4. LENGTH REQUIREMENT:
    - {length_guidance.get(length, length_guidance['medium'])}
-   - Count sentences carefully. DO NOT exceed the limit.
+   - The user expects a reasonable, professional email body of at least 5 sentences.
+   - DO NOT provide a 1-2 sentence response.
 
 5. GREETING CONSTRAINT:
    - Use ONLY this line as the greeting: "Dear {recipient_name or default_greeting_target},"

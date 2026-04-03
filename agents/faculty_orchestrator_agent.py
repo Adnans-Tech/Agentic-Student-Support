@@ -1026,13 +1026,21 @@ class FacultyOrchestratorAgent:
         purpose = slots.get("purpose")
         tone = slots.get("tone")  # Only set if user explicitly requests a tone
 
+        # --- Phase 1: Try LLM-assisted extraction if slots are thin ---
+        # If we have a long message but few slots, ask the LLM to help extract
+        if not recipient_email or not student_name_hint or not purpose:
+            extracted = self._extract_email_slots_with_llm(msg)
+            recipient_email = recipient_email or extracted.get("recipient_email")
+            student_name_hint = student_name_hint or extracted.get("recipient_name")
+            purpose = purpose or extracted.get("purpose")
+            tone = tone or extracted.get("tone")
+
         # Clean the purpose: remove intent words and recipient details from final body hint
         body_hint = purpose or msg
         if not purpose:
-            # Strip "email to X", "send email to X", "RECIPIENT NAME: X", etc.
+            # Strip intent labels
             temp_hint = re.sub(r'(?i)^(email|send email|write|compose|contact|draft)\s+(to\s+)?(\w+\s*){1,3}', '', body_hint).strip()
             temp_hint = re.sub(r'(?i)\b(RECIPIENT NAME|EMAIL|TO|RECIPIENT):\s*[\w.@\s-]+', '', temp_hint).strip()
-            # Remove leading connectors like "about", "regarding"
             temp_hint = re.sub(r'(?i)^(about|regarding|for|asking|to discuss|to request|inquiring)\s+', '', temp_hint).strip()
             if len(temp_hint) > 1:
                 body_hint = temp_hint
@@ -1311,17 +1319,25 @@ class FacultyOrchestratorAgent:
     ) -> Dict:
         """
         Uses EmailAgent LLM to generate a polished body, then returns an
-        'email_preview' response that matches the existing ConfirmationCard
-        component (same as student chat).
+        'email_preview' response.
         """
+        effective_tone = tone or "semi-formal"
+        
         # Resolve recipient's actual name for personalization
-        recipient_name = "Student"
-        try:
-            student_match = self._repo.find_by_email(to_email)
-            if student_match:
-                recipient_name = student_match.get("full_name", "Student")
-        except Exception:
-            pass
+        # Priority: 1. Explicitly extracted hint, 2. DB lookup, 3. "Student"
+        flow = _get_flow(session_id)
+        recipient_name = flow.get("name_hint") or flow.get("student_name")
+        
+        if not recipient_name or "@" in str(recipient_name):
+            try:
+                student_match = self._repo.find_by_email(to_email)
+                if student_match:
+                    recipient_name = student_match.get("full_name", "Student")
+            except Exception:
+                pass
+        
+        if not recipient_name:
+            recipient_name = "Student"
 
         try:
             if self._email_agent and hasattr(self._email_agent, 'llm_client') and self._email_agent.llm_client:
@@ -1480,6 +1496,47 @@ class FacultyOrchestratorAgent:
 # ============================================================================
 
 _faculty_orch_instance: Optional[FacultyOrchestratorAgent] = None
+
+
+    def _extract_email_slots_with_llm(self, text: str) -> Dict[str, Any]:
+        """
+        Uses LLM to extract email-related slots from a user query.
+        Returns a dict with: recipient_name, recipient_email, purpose, tone
+        """
+        if not self._llm:
+            return {}
+        try:
+            prompt = (
+                "You are an expert NLU engine for a college support system.\n"
+                "Extract the following slots from the user's email request:\n"
+                "- recipient_name: The name of the person being emailed (e.g., 'Anurag')\n"
+                "- recipient_email: The email address (e.g., 'test@gmail.com')\n"
+                "- purpose: The core reason for the email (e.g., 'meeting about event preparations')\n"
+                "- tone: The requested tone (formal, semi-formal, friendly, urgent, strict)\n\n"
+                f"User Message: \"{text}\"\n\n"
+                "Return ONLY a JSON object. If a slot is not found, use null.\n"
+                "Example: {\"recipient_name\": \"Anurag\", \"recipient_email\": \"anurag@gmail.com\", \"purpose\": \"discuss event prep\", \"tone\": \"semi-formal\"}"
+            )
+            resp = self._llm.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "You extract email slots from text. Return ONLY JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=200,
+            )
+            content_resp = resp.choices[0].message.content.strip()
+            # Clean JSON
+            if "```" in content_resp:
+                content_resp = content_resp.split("```")[1]
+                if content_resp.startswith("json"):
+                    content_resp = content_resp[4:].strip()
+            import json
+            return json.loads(content_resp)
+        except Exception as e:
+            print(f"[FACULTY_ORCH] LLM Slot extraction failed: {e}")
+            return {}
 
 
 def get_faculty_orchestrator() -> FacultyOrchestratorAgent:
