@@ -7,6 +7,7 @@ import api from './api';
 
 const TOKEN_KEY = 'aceToken';
 const USER_KEY = 'aceUser';
+const ACTIVE_ROLE_KEY = 'aceActiveRole';
 
 const authService = {
 
@@ -177,6 +178,17 @@ const authService = {
     clearAuth: () => {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
+        localStorage.removeItem(ACTIVE_ROLE_KEY);
+    },
+
+    setActiveRole: (role) => {
+        if (role) {
+            localStorage.setItem(ACTIVE_ROLE_KEY, role);
+        }
+    },
+
+    getActiveRole: () => {
+        return localStorage.getItem(ACTIVE_ROLE_KEY);
     },
 
     isAuthenticated: () => {

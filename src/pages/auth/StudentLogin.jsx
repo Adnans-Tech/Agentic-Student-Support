@@ -80,6 +80,9 @@ const Login = () => {
                     return;
                 }
 
+                // Store the role context selected during login
+                authService.setActiveRole(role);
+
                 // Route based on selected role tab
                 if (role === 'admin') {
                     navigate('/admin/dashboard');

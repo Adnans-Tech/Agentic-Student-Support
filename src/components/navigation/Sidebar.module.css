@@ -184,15 +184,58 @@
     border-top: 1px solid var(--color-border);
     flex-shrink: 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    flex-direction: column;
+    gap: 12px;
     transition: border-color 0.3s ease;
 }
 
 .sidebar.collapsed .footer {
-    flex-direction: column;
     padding: 12px 8px;
+    gap: 12px;
+}
+
+.switchButton {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.2s ease;
+    overflow: hidden;
+}
+
+.switchButton:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text-primary);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.sidebar.collapsed .switchButton {
+    padding: 10px;
+    justify-content: center;
+}
+
+.switchText {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.userFooterSection {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+}
+
+.sidebar.collapsed .userFooterSection {
+    flex-direction: column;
     gap: 12px;
 }
 

@@ -20,9 +20,11 @@ import {
     Bot,
     Inbox,
     Megaphone,
-    BarChart3
+    BarChart3,
+    ArrowLeftRight,
+    ShieldCheck
 } from 'lucide-react';
-import { getCurrentUser, isAdmin } from '../../utils/auth';
+import { getCurrentUser, isAdmin, getUserRole, hasAdminPrivileges } from '../../utils/auth';
 import authService from '../../services/authService';
 import styles from './Sidebar.module.css';
 
@@ -56,24 +58,31 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const user = getCurrentUser();
-    const isUserAdmin = isAdmin();
-    const isFaculty = user?.role === 'faculty';
-
+    
+    // Core Role Checks
+    const activeRole = getUserRole();
+    const isAdminPrivileged = hasAdminPrivileges();
+    
     const isFacultyRoute = location.pathname.startsWith('/faculty');
     const isAdminRoute = location.pathname.startsWith('/admin');
 
-    // Choose nav based on location if user is admin, otherwise fallback to role
+    // Navigation setup based on active role
     let navItems = STUDENT_NAV;
-    if (isUserAdmin) {
-        // Admins see navigation based on where they are in the app
-        navItems = isFacultyRoute ? FACULTY_NAV : ADMIN_NAV;
-    } else if (isFaculty) {
+    if (activeRole === 'admin') {
+        navItems = ADMIN_NAV;
+    } else if (activeRole === 'faculty') {
         navItems = FACULTY_NAV;
     }
 
     const handleLogout = () => {
         authService.logout();
         navigate('/login');
+    };
+
+    const handleSwitchRole = () => {
+        const nextRole = activeRole === 'admin' ? 'faculty' : 'admin';
+        authService.setActiveRole(nextRole);
+        navigate(nextRole === 'admin' ? '/admin/dashboard' : '/faculty/dashboard');
     };
 
     // Build profile photo URL
@@ -138,33 +147,48 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                 })}
             </nav>
 
-            {/* Footer: User Profile + Logout */}
+            {/* Footer: User Profile + Logout + Switch Role */}
             <div className={styles.footer}>
-                <div className={styles.userSection}>
-                    {photoUrl ? (
-                        <img src={photoUrl} alt="Profile" className={styles.userAvatar} />
-                    ) : (
-                        <div className={styles.userAvatarPlaceholder}>
-                            {getInitials(user?.full_name || user?.name)}
+                {isAdminPrivileged && (
+                    <motion.button
+                        onClick={handleSwitchRole}
+                        className={styles.switchButton}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        title={activeRole === 'admin' ? 'Switch to Faculty Mode' : 'Switch to Admin Mode'}
+                    >
+                        <ArrowLeftRight size={18} strokeWidth={2} />
+                        {!isCollapsed && <span className={styles.switchText}>Switch to {activeRole === 'admin' ? 'Faculty' : 'Admin'}</span>}
+                    </motion.button>
+                )}
+                
+                <div className={styles.userFooterSection}>
+                    <div className={styles.userSection}>
+                        {photoUrl ? (
+                            <img src={photoUrl} alt="Profile" className={styles.userAvatar} />
+                        ) : (
+                            <div className={styles.userAvatarPlaceholder}>
+                                {getInitials(user?.full_name || user?.name)}
+                            </div>
+                        )}
+                        <div className={styles.userInfoWrapper}>
+                            <span className={styles.userName}>{user?.full_name || user?.name}</span>
+                            <span className={styles.userRole}>
+                                {activeRole === 'admin' ? 'Admin' : activeRole === 'faculty' ? 'Faculty' : 'Student'}
+                            </span>
                         </div>
-                    )}
-                    <div className={styles.userInfoWrapper}>
-                        <span className={styles.userName}>{user?.full_name || user?.name}</span>
-                        <span className={styles.userRole}>
-                            {isAdminRoute ? 'Admin' : (isFacultyRoute || isFaculty ? 'Faculty' : 'Student')}
-                        </span>
                     </div>
+                    <motion.button
+                        onClick={handleLogout}
+                        className={styles.logoutButton}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        aria-label="Logout"
+                        title="Logout"
+                    >
+                        <LogOut size={18} strokeWidth={2} />
+                    </motion.button>
                 </div>
-                <motion.button
-                    onClick={handleLogout}
-                    className={styles.logoutButton}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    aria-label="Logout"
-                    title="Logout"
-                >
-                    <LogOut size={18} strokeWidth={2} />
-                </motion.button>
             </div>
         </aside>
     );

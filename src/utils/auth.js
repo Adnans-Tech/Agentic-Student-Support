@@ -19,20 +19,24 @@ export const getCurrentUser = () => {
 };
 
 /**
- * Get user role
+ * Get user role — prioritizes the session's activeRole,
+ * falls back to the database-assigned role from JWT.
  */
 export const getUserRole = () => {
+    const activeRole = authService.getActiveRole();
+    if (activeRole) return activeRole;
+
     const user = getCurrentUser();
     return user?.role || null;
 };
 
 /**
- * Check if user has specific role
+ * Check if user has specific role.
+ * Explicitly checks against the active session role.
  */
 export const hasRole = (role) => {
-    if (isAdmin()) return true;
-    const userRole = getUserRole();
-    return userRole === role;
+    const activeRole = getUserRole();
+    return activeRole === role;
 };
 
 /**
@@ -50,23 +54,30 @@ export const isFaculty = () => {
 };
 
 /**
- * Check if user is admin (flag based, overrides role)
+ * Check if user has admin privileges (regardless of current mode)
  */
-export const isAdmin = () => {
+export const hasAdminPrivileges = () => {
     const user = getCurrentUser();
     return user?.is_admin === true;
 };
 
 /**
- * Get redirect path based on user role and admin flag
+ * Check if user is currently in Admin Mode
+ */
+export const isAdmin = () => {
+    return getUserRole() === 'admin';
+};
+
+/**
+ * Get redirect path based on the user's active session role
  */
 export const getDefaultRoute = () => {
     const role = getUserRole();
+    
     if (role === 'admin') return '/admin/dashboard';
     if (role === 'faculty') return '/faculty/dashboard';
     if (role === 'student') return '/student/dashboard';
     
-    if (isAdmin()) return '/admin/dashboard';
     return '/login';
 };
 
