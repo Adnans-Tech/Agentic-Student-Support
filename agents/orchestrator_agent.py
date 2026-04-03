@@ -1215,7 +1215,20 @@ Return ONLY valid JSON:
                 return self._route_to_handler(
                     pre_intent, 1.0, {}, message, user_id, session_id,
                     student_profile)
-            slots["purpose"] = message.strip()
+            
+            # Clean purpose: remove intent words if user repeated them
+            clean_p = re.sub(r'(?i)^(email|send email|write|compose|contact|draft)\s+(to\s+)?(\w+\s*){1,3}', '', message).strip()
+            clean_p = re.sub(r'(?i)^(about|regarding|for|asking|to discuss|to request|inquiring)\s+', '', clean_p).strip()
+            
+            if len(clean_p) < 15 or clean_p.lower() in ("send email", "email", "compose", "draft"):
+                return self._make_response(
+                    "I've got the recipient. What specific **details** should I include in the email? (e.g. a question about a course, a meeting request, or a reminder)",
+                    response_type="clarification_request",
+                    session_id=session_id, user_id=user_id,
+                    user_message=message, intent="EMAIL", agent="email_agent",
+                    student_profile=student_profile, active_flow="email", slots=slots)
+
+            slots["purpose"] = clean_p
             return self._generate_email_preview(
                 message, user_id, session_id, student_profile, slots, entities)
 
@@ -1311,8 +1324,13 @@ Return ONLY valid JSON:
         # Identify the best candidate for recipient name
         recipient_name = slots.get("recipient_name")
         if not recipient_name or "@" in str(recipient_name):
+             # Try faculty_name if recipient_name is missing or an email
              recipient_name = slots.get("faculty_name")
         
+        # Strip common titles from the recipient name for a natural greeting
+        if recipient_name:
+             recipient_name = re.sub(r'\b(Dr|Prof|Professor|Mr|Mrs|Ms|Madam|Sir)\.?\s+', '', str(recipient_name), flags=re.I).strip()
+
         if not recipient_name or "@" in str(recipient_name):
              recipient_name = slots.get("recipient_email", "")
              if "@" in recipient_name:

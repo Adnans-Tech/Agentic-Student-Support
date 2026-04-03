@@ -215,7 +215,7 @@ Generate ONLY the subject line, nothing else."""
             prompt = f"""Generate a professional email body for this EXACT purpose:
 
 Purpose: {purpose}
-Recipient: {default_greeting_target}
+Recipient Name: {recipient_name or default_greeting_target}
 Tone: {tone}
 Length: {length}
 
@@ -226,35 +226,28 @@ Length Guidance: {length_guidance.get(length, length_guidance['medium'])}
 
 1. PURPOSE PRESERVATION (ABSOLUTE PRIORITY):
    - Write ONLY about the stated purpose: "{purpose}"
-   - EXTRACT and USE every specific detail mentioned in the purpose:
-     * Dates/times (e.g., "tomorrow", "3 PM", "March 29") → MUST appear verbatim in email
-     * Documents/items (e.g., "resume", "ID card", "report") → MUST be mentioned explicitly
-     * Locations (e.g., "Room 325", "conference hall") → MUST be included
-     * Names (e.g., "Dr. Smith", "HR team") → MUST be used
-   - If purpose says "tomorrow's interview" → email MUST say "interview scheduled for tomorrow"
-   - If purpose says "carry a copy of resume" → email MUST explicitly remind about bringing a resume
-   - DO NOT ask vague questions if the purpose already provides all details.
-   - If the purpose is a STATEMENT (e.g., "attend interview tomorrow"), the email must CONFIRM or ACT on it, NOT ask about it.
+   - DO NOT invent details. EXTRACT and USE ONLY details provided in the purpose.
+   - If the purpose mentions specific Dates, Times, Locations, or Items, you MUST include them.
+   - NEVER add information not present in the purpose (e.g., do not add interview rooms, times, or resume reminders unless they were specifically mentioned).
+   - If the purpose is a STATEMENT, confirm or act on it; do NOT transform it into a vague question.
 
 {voice_rules}
 
 3. NO GENERIC FILLER:
-   - DO NOT write: "I would like to know if I can attend", "Please let me know the details"
-   - DO NOT write: "I look forward to hearing from you about this matter"
-   - Instead, write DIRECTLY about what the purpose states, using the specific details.
-   - If purpose says to remind about something, the email MUST clearly state that reminder.
+   - DO NOT use generic placeholders like "[Your Name]" or "[Date]".
+   - DO NOT add pleasantries like "I hope this email finds you well" unless the purpose includes it.
+   - Use the specific details from the purpose to make the email sound grounded and authentic.
 
 4. LENGTH ENFORCEMENT:
    - {length_guidance.get(length, length_guidance['medium'])}
    - Count sentences carefully. DO NOT exceed the limit.
 
 5. GREETING CONSTRAINT:
-   - Use ONLY one line: "Dear {default_greeting_target},"
-   - DO NOT add "I hope this email finds you well" or similar pleasantries{image_instruction}
+   - Use ONLY this line as the greeting: "Dear {recipient_name or default_greeting_target},"
+   - Use the recipient's name if provided, otherwise use the default.{image_instruction}
 
 6. PLAIN TEXT FORMAT:
-   - NO HTML tags
-   - Use standard punctuation and line breaks only
+   - NO HTML tags. Use standard punctuation and line breaks ONLY.
 
 Generate ONLY the email body (greeting + content), NO signature."""
             

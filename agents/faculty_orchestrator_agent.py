@@ -1026,8 +1026,16 @@ class FacultyOrchestratorAgent:
         purpose = slots.get("purpose")
         tone = slots.get("tone")  # Only set if user explicitly requests a tone
 
-        # Use the full user message as purpose/body hint when purpose is extracted
+        # Clean the purpose: remove intent words and recipient details from final body hint
         body_hint = purpose or msg
+        if not purpose:
+            # Strip "email to X", "send email to X", "RECIPIENT NAME: X", etc.
+            temp_hint = re.sub(r'(?i)^(email|send email|write|compose|contact|draft)\s+(to\s+)?(\w+\s*){1,3}', '', body_hint).strip()
+            temp_hint = re.sub(r'(?i)\b(RECIPIENT NAME|EMAIL|TO|RECIPIENT):\s*[\w.@\s-]+', '', temp_hint).strip()
+            # Remove leading connectors like "about", "regarding"
+            temp_hint = re.sub(r'(?i)^(about|regarding|for|asking|to discuss|to request|inquiring)\s+', '', temp_hint).strip()
+            if len(temp_hint) > 1:
+                body_hint = temp_hint
 
         # If only a name was given, look up the student email from DB
         if not recipient_email and student_name_hint:
@@ -1107,7 +1115,7 @@ class FacultyOrchestratorAgent:
                 })
                 return self._reply(
                     f"Recipient: **{recipient_email}**. "
-                    "What is the **purpose** of this email? Please describe what you want to say.",
+                    "What is the **purpose** of this email? Please provide some details so I can draft it for you.",
                     "EMAIL_COMPOSE", session_id,
                 )
 
@@ -1219,9 +1227,19 @@ class FacultyOrchestratorAgent:
                 "EMAIL_COMPOSE", session_id,
             )
 
-        # --- Collecting missing: body/purpose ---
+        # Filter the message to get a clean purpose if it was just matched
+        clean_purpose = msg.strip()
+        clean_purpose = re.sub(r'(?i)\b(RECIPIENT NAME|EMAIL|TO|RECIPIENT):\s*[\w.@\s-]+', '', clean_purpose).strip()
+        
+        # If the extracted purpose is very short/vague, ask for more details
+        if not body and (len(clean_purpose) < 15 or clean_purpose.lower() in ("send email", "email", "compose", "draft")):
+            return self._reply(
+                "I've got the recipient. What specific **details** should I include in the email? (e.g. a meeting time, a reminder, or a request)",
+                "EMAIL_COMPOSE", session_id
+            )
+
         if not body:
-            body = msg.strip()
+            body = clean_purpose
             _set_flow(session_id, {**flow, "body": body})
             # Auto-derive subject from purpose
             if not subject:
@@ -1296,14 +1314,20 @@ class FacultyOrchestratorAgent:
         'email_preview' response that matches the existing ConfirmationCard
         component (same as student chat).
         """
-        # Determine tone: use explicit tone if provided, otherwise default to semi-formal
-        effective_tone = tone or "semi-formal"
+        # Resolve recipient's actual name for personalization
+        recipient_name = "Student"
+        try:
+            student_match = self._repo.find_by_email(to_email)
+            if student_match:
+                recipient_name = student_match.get("full_name", "Student")
+        except Exception:
+            pass
 
         try:
             if self._email_agent and hasattr(self._email_agent, 'llm_client') and self._email_agent.llm_client:
                 generated_body = self._email_agent.generate_email_body(
                     purpose=body_hint,
-                    recipient_name="Student",
+                    recipient_name=recipient_name,
                     tone=effective_tone,
                     length="medium",
                     student_name=faculty_name or "Faculty",
