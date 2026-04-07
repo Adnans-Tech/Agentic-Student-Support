@@ -1,269 +1,305 @@
-# ACE College Support System
+# ACE ASSIST — AI-Powered College Support System
 
-AI-powered student support system for ACE Engineering College, Ghatkesar. Provides intelligent chat support, ticket management, faculty contact, and email generation using LangChain, LangGraph, and Groq LLM.
+> 🎓 An intelligent multi-agent support system for ACE Engineering College, Ghatkesar.
+> Built with LangGraph, LangChain, Groq LLM, and React — deployed on Vercel + Supabase.
+
+🌐 **Live Demo**: [ACE ASSIST](https://agentic-multiagentsupportsystem-a77zw4wgg-adnans-techs-projects.vercel.app/login)
+
+---
 
 ## Features
 
-- **🤖 Chat Support**: AI-powered FAQ agent with RAG (Retrieval-Augmented Generation) using college knowledge base
-- **🎫 Ticket Management**: Raise and track support tickets with email notifications
-- **📧 Email Agent**: AI-assisted email composition with tone and length customization
-- **👨‍🏫 Faculty Contact**: Direct faculty communication with rate limiting and quota management
-- **🔀 Orchestrator Agent**: LangGraph-based intelligent routing for multi-turn conversations
-- **🔐 Authentication**: Student and faculty login with JWT and OTP verification
+- **🤖 AI Chat Support** — Intelligent FAQ agent with RAG over the college knowledge base
+- **🎫 Ticket Management** — Raise, track, and resolve support tickets with email notifications
+- **📧 Email Agent** — AI-assisted email composition with tone and length customization
+- **👨‍🏫 Faculty Contact** — Direct faculty email with rate limiting and quota management
+- **🧭 Multi-Agent Orchestrator** — LangGraph-powered routing for complex, multi-turn conversations
+- **🎓 Student Dashboard** — Profile, tickets, email history, and AI chat
+- **👩‍💼 Faculty Dashboard** — View assigned tickets, manage email inbox, and AI assistant
+- **🛡️ Admin Panel** — User directory, ticket oversight, announcements, and reports
+- **🔐 Authentication** — JWT-based login for Students, Faculty, and Admins (with optional OTP)
+
+---
 
 ## Tech Stack
 
 ### Backend
-- **Python 3.8+** with Flask
-- **LangChain** + **LangGraph** for agentic workflows
-- **Groq LLM** (Llama 3.1) for natural language processing
-- **FAISS** for vector storage and semantic search
-- **SQLite** for user data, tickets, and chat memory
-- **SendGrid** for email delivery
+
+| Technology | Purpose |
+|---|---|
+| Python 3.10+ + Flask | REST API server |
+| LangChain + LangGraph | Multi-agent orchestration |
+| Groq LLM (Llama 3.1) | Natural language processing |
+| Supabase (PostgreSQL) | Cloud database (production) |
+| SQLite | Local development fallback |
+| Pinecone | Cloud vector database |
+| Upstash Redis | Serverless chat memory |
+| SendGrid | Transactional email delivery |
+| Vercel | Cloud deployment platform |
 
 ### Frontend
-- **React 19** with React Router
-- **Vite** for fast development
-- **Framer Motion** for animations
-- **Lucide Icons** for UI
+
+| Technology | Purpose |
+|---|---|
+| React 19 + Vite | UI framework |
+| React Router v7 | Client-side routing |
+| Framer Motion | Animations and transitions |
+| Recharts | Data visualization and charts |
+| Lucide Icons | Icon library |
+| CSS Modules | Component-scoped styling |
+
+---
 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.8 or higher
+
+- Python 3.10 or higher
 - Node.js 18 or higher
-- Groq API key ([Get one here](https://console.groq.com/keys))
-- SendGrid API key ([Get one here](https://app.sendgrid.com/settings/api_keys))
+- [Groq API key](https://console.groq.com/keys)
+- [SendGrid API key](https://app.sendgrid.com/settings/api_keys)
+- [Supabase account](https://supabase.com) (for production database)
 
-### Installation
+### 1. Clone the repository
 
-1. **Clone and navigate to project**
-   ```bash
-   cd "c:\Users\mohd adnan\Desktop\agents"
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   copy .env.example .env
-   ```
-   Edit `.env` and add your API keys:
-   ```
-   GROQ_API_KEY=your_groq_api_key_here
-   SENDGRID_API_KEY=your_sendgrid_api_key_here
-   NOTIFICATION_EMAIL_FROM=your_email@example.com
-   ```
-
-3. **Install Python dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Install frontend dependencies**
-   ```bash
-   cd frontend
-   npm install
-   cd ..
-   ```
-
-5. **Start the application**
-   ```bash
-   start.bat
-   ```
-
-   This will:
-   - Start the backend server on `http://localhost:5000`
-   - Start the frontend on `http://localhost:5173`
-   - Automatically open your browser
-
-## Manual Startup (Alternative)
-
-If you prefer to start servers separately:
-
-**Backend**:
 ```bash
-python app.py
+git clone https://github.com/Adnans-Tech/Agentic-Student-Support.git
+cd Agentic-Student-Support
 ```
 
-**Frontend**:
+### 2. Set up environment variables
+
 ```bash
-cd frontend
-npm run dev
+# Windows
+copy .env.example .env
+
+# macOS / Linux
+cp .env.example .env
 ```
 
-## Project Structure
+Open `.env` and fill in your API keys. See [Environment Variables](#environment-variables) below for details.
 
-```
-agents/
-├── app.py                      # Main Flask application (35 endpoints)
-├── config.py                   # Configuration and environment variables
-├── auth_utils.py               # JWT authentication utilities
-├── start.bat                   # Single-command startup script
-├── requirements.txt            # Python dependencies
-├── .env                        # Environment variables (DO NOT COMMIT)
-├── .env.example                # Environment template
-├── college_rules.txt           # College knowledge base (263 lines)
-│
-├── agents/                     # AI agents and services
-│   ├── faq_agent.py           # RAG-based FAQ agent
-│   ├── orchestrator_agent.py  # LangGraph routing agent
-│   ├── email_agent.py         # Email generation agent
-│   ├── ticket_agent.py        # Ticket management
-│   ├── vector_store.py        # FAISS vector database manager
-│   ├── chat_memory.py         # Conversation history management
-│   └── faculty_db.py          # Faculty database service
-│
-├── data/                       # SQLite databases and vector storage
-│   ├── students.db            # Student authentication
-│   ├── faculty.db             # Faculty data
-│   ├── tickets.db             # Support tickets
-│   ├── chat_memory.db         # Chat sessions
-│   └── vectordb/              # FAISS vector store
-│
-└── frontend/                   # React frontend
-    ├── src/
-    │   ├── pages/             # Student/Faculty dashboards
-    │   ├── components/        # Reusable UI components
-    │   └── services/          # API integration
-    ├── package.json
-    └── vite.config.js
-```
+### 3. Install Python dependencies
 
-## Key APIs
-
-### Student Authentication
-- `POST /api/auth/student/register` - Register new student
-- `POST /api/auth/student/login` - Student login
-- `POST /api/auth/send-otp` - Send OTP for verification
-
-### Chat & FAQ
-- `POST /api/chat/orchestrator` - Main chat endpoint (LangGraph routing)
-- `POST /api/faq` - Direct FAQ agent queries
-- `POST /api/chat/reset` - Clear conversation history
-
-### Ticket Management
-- `GET /api/tickets/categories` - Get ticket categories
-- `POST /api/tickets/create` - Create support ticket
-- `GET /api/tickets/student/<email>` - Get student's tickets
-
-### Faculty Contact
-- `GET /api/faculty/departments` - Get all departments
-- `GET /api/faculty/list?department=CSE` - Get faculty by department
-- `POST /api/faculty/send-email` - Send email to faculty
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | ✅ Yes | Groq API key for LLM inference |
-| `SENDGRID_API_KEY` | ✅ Yes | SendGrid API for email delivery |
-| `JWT_SECRET_KEY` | ⚠️ Recommended | Secret key for JWT (change in production!) |
-| `NOTIFICATION_EMAIL_FROM` | ⚠️ Recommended | Sender email address |
-| `FRONTEND_URL` | No | Frontend URL for CORS (default: localhost:5173) |
-
-## Features in Detail
-
-### Chat Support (Orchestrator Agent)
-- **Intent Classification**: Automatically detects if user wants FAQ, raise ticket, or contact faculty
-- **Multi-turn Conversations**: Maintains context across messages
-- **Conversational Ticket Raising**: Asks clarifying questions before creating tickets
-- **Faculty Identification**: Intelligently matches faculty based on department and name
-
-### FAQ Agent (RAG)
-- **Semantic Search**: Uses FAISS vector database for college rules
-- **Context-Aware**: Remembers previous conversation for follow-up questions
-- **Natural Responses**: Groq LLM generates friendly, conversational answers
-
-### Ticket System
-- **Category-based**: Academic, Technical, Administrative, Hostel, Transport
-- **SLA Tracking**: 24-48 hour response times
-- **Email Notifications**: Automatic confirmation emails
-- **Duplicate Prevention**: Checks for open tickets in same category
-
-## Deployment Preparation
-
-### For Production Deployment:
-
-1. **Update environment variables**
-   - Generate strong `JWT_SECRET_KEY`
-   - Use production email addresses
-   - Set `FRONTEND_URL` to your domain
-
-2. **Database Setup**
-   - Consider migrating to PostgreSQL for production
-   - Set up regular backups for SQLite databases
-   - Implement database migrations
-
-3. **Security**
-   - Enable HTTPS
-   - Set up proper CORS policies
-   - Implement rate limiting
-   - Add input validation and sanitization
-
-4. **Vector Database** (Optional Future Enhancement)
-   - See `VECTOR_DB_INTEGRATION.md` for Chroma DB migration guide
-   - Current FAISS setup works well for static college rules
-
-5. **Monitoring**
-   - Add logging for all API endpoints
-   - Set up error tracking (e.g., Sentry)
-   - Monitor API usage and quotas
-
-## Development
-
-### Running Tests
-```bash
-# Backend tests (if implemented)
-python -m pytest
-
-# Frontend tests
-cd frontend
-npm test
-```
-
-### Code Structure Guidelines
-- **Agents**: All AI agents in `agents/` directory
-- **Database**: All SQLite databases in `data/` directory
-- **Frontend**: React components in `frontend/src/`
-- **Configuration**: Environment-based config in `config.py`
-
-## Troubleshooting
-
-### "Module not found" error
 ```bash
 pip install -r requirements.txt
 ```
 
-### "API key not found" error
-Ensure `.env` file exists and contains valid API keys
+### 4. Install frontend dependencies
 
-### Frontend not connecting to backend
-Verify backend is running on `http://localhost:5000` and frontend on `http://localhost:5173`
+```bash
+npm install
+```
 
-### Vector store initialization error
-Delete `data/vectordb/` and restart - it will rebuild automatically from `college_rules.txt`
+### 5. Run locally
 
-## Future Enhancements
+**Backend** (in one terminal):
+```bash
+python -m flask --app api/index run --port 5000
+```
 
-- [ ] Faculty dashboard for ticket management
-- [ ] Admin panel for system configuration
-- [ ] Chroma DB integration for chat memory (see `VECTOR_DB_INTEGRATION.md`)
-- [ ] Multi-language support
-- [ ] Voice input for chat
-- [ ] Mobile app (React Native)
-- [ ] Analytics dashboard
+**Frontend** (in another terminal):
+```bash
+npm run dev
+```
 
-## License
+The app will be available at:
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:5000
 
-Private - ACE Engineering College Internal Use Only
-
-## Support
-
-For issues or questions:
-- Contact: 091333 08533
-- Email: mohdadnan2k4@gmail.com
+> **Note**: For local development, set `USE_POSTGRES=false` in your `.env` to use SQLite automatically.
 
 ---
 
-**Last Updated**: January 2026  
-**Version**: 1.0.0  
-**Status**: Production Ready ✅
+## Project Structure
+
+```
+Agentic-Student-Support/
+│
+├── api/
+│   └── index.py                       # Flask app & all API routes (Vercel entry point)
+│
+├── agents/                            # AI agent modules
+│   ├── orchestrator_agent.py          # LangGraph student routing agent
+│   ├── faculty_orchestrator_agent.py  # LangGraph faculty routing agent
+│   ├── faq_agent.py                   # RAG-based FAQ agent
+│   ├── email_agent.py                 # Email composition agent
+│   ├── ticket_agent.py                # Ticket management logic
+│   ├── ticket_db.py                   # Ticket database operations
+│   ├── faculty_db.py                  # Faculty database operations
+│   ├── student_records_repo.py        # Student records repository
+│   ├── chat_memory.py                 # Chat session management
+│   ├── vector_store.py                # Vector store interface
+│   ├── agent_data_access.py           # Shared data access layer
+│   ├── agent_protocol.py              # Agent communication protocol
+│   ├── deduplication.py               # Duplicate message detection
+│   ├── email_request_service.py       # Email request handler
+│   ├── history_rag_service.py         # Conversation history RAG
+│   ├── flow_pause.py                  # Conversation flow control
+│   ├── ticket_config.py               # Ticket categories & config
+│   ├── turn_logging.py                # Conversation turn logger
+│   └── db_utils.py                    # Shared DB utilities
+│
+├── core/                              # Core configuration
+│   ├── config.py                      # App-wide settings and API key loading
+│   └── db_config.py                   # DB connection factory (Supabase / SQLite)
+│
+├── services/                          # Business logic services
+│   ├── profile_service.py             # Student profile operations
+│   ├── faculty_profile_service.py     # Faculty profile operations
+│   ├── activity_service.py            # Activity and analytics tracking
+│   ├── stats_service.py               # System statistics
+│   └── limits_service.py              # Rate limiting service
+│
+├── utils/                             # Utilities
+│   └── auth_utils.py                  # JWT authentication helpers
+│
+├── data/                              # Static data files
+│   ├── college_rules.txt              # College knowledge base (used for RAG)
+│   └── ACE data.xlsx                  # Staff/student seed data for import
+│
+├── docs/                              # Documentation
+│   ├── RAG_Algorithm_Report.txt       # RAG system technical report
+│   ├── RAG_Pipeline_Flow.png          # RAG pipeline diagram
+│   ├── RAG_System_Architecture.png    # System architecture diagram
+│   └── VECTOR_DB_INTEGRATION.md       # Vector DB migration guide
+│
+├── scripts/                           # Utility & maintenance scripts
+│   ├── fix_pg_columns.py              # PostgreSQL schema migration helper
+│   └── archive/                       # One-time migration scripts (reference only)
+│
+├── tests/                             # Test suite
+│   └── test_orchestrator.py           # Orchestrator agent tests
+│
+├── src/                               # React frontend source
+│   ├── pages/
+│   │   ├── admin/                     # Admin dashboard (Dashboard, UserManagement, etc.)
+│   │   ├── faculty/                   # Faculty dashboard (Dashboard, Profile, etc.)
+│   │   ├── student/                   # Student dashboard (ChatSupport, Tickets, etc.)
+│   │   └── auth/                      # Login & Registration pages
+│   ├── components/                    # Reusable React components
+│   ├── services/                      # Frontend API clients
+│   ├── contexts/                      # React context providers
+│   ├── layouts/                       # Page layout components
+│   ├── styles/                        # Global stylesheets
+│   └── utils/                         # Frontend utility functions
+│
+├── public/                            # Static public assets
+├── .env.example                       # Environment variable template ← copy to .env
+├── requirements.txt                   # Python dependencies
+├── package.json                       # Node.js dependencies
+├── vercel.json                        # Vercel deployment configuration
+└── index.html                         # Frontend HTML entry point
+```
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill in the values:
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | ✅ Yes | Groq LLM API key |
+| `SENDGRID_API_KEY` | ✅ Yes | SendGrid email API key |
+| `DATABASE_URL` | ✅ Production | Supabase PostgreSQL connection string |
+| `JWT_SECRET_KEY` | ⚠️ Recommended | Secret key for JWT tokens (use a strong random string) |
+| `NOTIFICATION_EMAIL_FROM` | ⚠️ Recommended | Verified sender email address |
+| `USE_POSTGRES` | ⚠️ Recommended | `true` for Supabase (production), `false` for SQLite (local dev) |
+| `SUPABASE_DB_URL_POOLER` | No | Supabase pooler URL (recommended for Vercel) |
+| `FRONTEND_URL` | No | Frontend URL for CORS (default: `http://localhost:5173`) |
+| `ENABLE_OTP` | No | Enable OTP email verification (default: `false`) |
+| `CHAT_MEMORY_BACKEND` | No | Chat memory backend: `sqlite` or `redis` (default: `sqlite`) |
+
+---
+
+## Deployment (Vercel)
+
+This project is pre-configured for Vercel via `vercel.json`.
+
+1. **Fork or push** this repository to GitHub
+2. **Import** the project at [vercel.com/new](https://vercel.com/new)
+3. **Add all environment variables** in the Vercel project dashboard
+4. **Deploy** — Vercel builds the React frontend and deploys the Flask backend as serverless functions
+
+> ⚠️ **Important**: Set `USE_POSTGRES=true` and provide a valid `DATABASE_URL` from Supabase.
+> SQLite is **not supported** on Vercel's read-only filesystem.
+
+---
+
+## API Reference
+
+### Authentication
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/student/register` | Register a new student |
+| `POST` | `/api/auth/student/login` | Student login |
+| `POST` | `/api/auth/faculty/login` | Faculty login |
+| `POST` | `/api/auth/send-otp` | Send OTP for verification |
+
+### Chat & FAQ
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/chat/orchestrator` | Main student AI chat (LangGraph) |
+| `POST` | `/api/faculty/chat` | Faculty AI assistant |
+| `POST` | `/api/faq` | Direct FAQ query |
+| `POST` | `/api/chat/reset` | Reset conversation history |
+
+### Ticket Management
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/tickets/categories` | Get ticket categories |
+| `POST` | `/api/tickets/create` | Create a support ticket |
+| `GET` | `/api/tickets/student/<email>` | Get a student's tickets |
+| `GET` | `/api/tickets/faculty/<email>` | Get faculty-assigned tickets |
+
+### Faculty
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/faculty/departments` | List all departments |
+| `GET` | `/api/faculty/list` | Get faculty by department |
+| `POST` | `/api/faculty/send-email` | Send email to a faculty member |
+
+---
+
+## Troubleshooting
+
+**`Module not found` error**
+```bash
+pip install -r requirements.txt
+```
+
+**`API key not found` error**
+Ensure `.env` exists and contains valid keys. Copy `.env.example` to `.env` and fill in the values.
+
+**Frontend not connecting to backend**
+Make sure the backend is running on `http://localhost:5000` and the frontend on `http://localhost:5173`.
+
+**Postgres connection failed on Vercel**
+- Set `USE_POSTGRES=true` in your Vercel environment variables.
+- Ensure `DATABASE_URL` is your Supabase connection string.
+- Try setting `SUPABASE_DB_URL_POOLER` to the "Transaction" pooler URL from Supabase settings.
+
+**Vector store / Pinecone error**
+Ensure `PINECONE_API_KEY` is set in your environment.
+
+---
+
+## License
+
+Private — ACE Engineering College, Ghatkesar — Internal Use Only
+
+---
+
+## Contact
+
+- **Email**: mohdadnan2k4@gmail.com
+- **GitHub**: [Adnans-Tech](https://github.com/Adnans-Tech)
+
+---
+
+*ACE ASSIST — Empowering students with intelligent support* 🎓
